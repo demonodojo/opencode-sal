@@ -1,0 +1,27 @@
+import "../../sal/std/soso/io.sal"
+import "../../sal/std/soso/net.sal"
+
+fn http_read_body(fd: Int, max: Int) -> String ! io, alloc
+    acc = ""
+    left = max
+    while left > 0
+        buf = bytes_new(4096)
+        n = read_timeout_fd(fd, bytes_ptr(buf), 4096, 500)
+        if n <= 0
+            left = 0
+        else
+            piece = bytes_to_str(bytes_view(buf, 0, n))
+            acc = str_concat(acc, piece)
+            left = left - n
+    acc
+
+fn http_post(port: Int, path: String, body: String) -> String ! io, alloc
+    fd = tcp_connect_loopback(port, 5000)
+    if fd < 0
+        ""
+    else
+        req = "POST " + path + " HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: " + int_to_str(str_len(body)) + "\r\nConnection: close\r\n\r\n" + body
+        _w = write_str_fd(fd, req)
+        resp = http_read_body(fd, 65536)
+        _c = close_fd(fd)
+        resp

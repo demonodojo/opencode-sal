@@ -1,0 +1,38 @@
+import "agent_run.sal"
+import "../../sal/std/soso/io.sal"
+import "../../sal/std/soso/process.sal"
+
+fn version_str() -> String
+    "opencode-sal 0.1.0"
+
+fn main() -> Int ! io, alloc
+    if argc() < 2
+        _v = write_str_fd(1, version_str() + "\n")
+        0
+    else
+        a1 = argv(1)
+        if str_eq(a1, "--version") != 0
+            _v = write_str_fd(1, version_str() + "\n")
+            0
+        else
+            if str_eq(a1, "run") != 0
+                fmt = 0
+                prompt = ""
+                if argc() >= 3
+                    if str_eq(argv(2), "--format") != 0
+                        if argc() >= 5
+                            if str_eq(argv(3), "json") != 0
+                                fmt = 1
+                            prompt = argv(4)
+                    else
+                        prompt = argv(2)
+                if str_len(prompt) <= 0
+                    prompt = "hello"
+                run_once(prompt, fmt)
+            else
+                if str_eq(a1, "reinstalar") != 0
+                    _s = spawn_io_full("/bin/soso-pkg", 0, 1, 2, -1)
+                    0
+                else
+                    _h = write_str_fd(2, "uso: opencode [--version|run|reinstalar]\n")
+                    2

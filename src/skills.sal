@@ -1,0 +1,7 @@
+import "../../sal/std/soso/fs.sal"
+
+fn skill_load(name: String) -> String ! io, alloc
+    read_file(".opencode/skills/" + name + "/SKILL.md")
+
+fn sal_tool_manifest(path: String) -> String ! io, alloc
+    read_file(path)

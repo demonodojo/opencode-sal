@@ -1,0 +1,29 @@
+import "config.sal"
+import "http.sal"
+import "json.sal"
+import "sse.sal"
+import "session.sal"
+import "../../sal/std/soso/io.sal"
+
+fn chat_body(prompt: String, _model: String) -> String ! alloc
+    "model=soso-coder user=" + json_esc(prompt)
+
+fn run_once(prompt: String, json_out: Int) -> Int ! io, alloc
+    model = config_model()
+    body = chat_body(prompt, model)
+    resp = http_post(7422, "/v1/chat/completions", body)
+    if sse_has_data(resp) != 0
+        line = json_emit_line("text", "ok")
+        if json_out != 0
+            _w = write_str_fd(1, line)
+        _d = session_save("last", resp)
+        0
+    else
+        if str_contains(resp, "content") != 0
+            line = json_emit_line("text", "model")
+            if json_out != 0
+                _w = write_str_fd(1, line)
+            _fin = write_str_fd(1, json_emit_done())
+            0
+        else
+            1

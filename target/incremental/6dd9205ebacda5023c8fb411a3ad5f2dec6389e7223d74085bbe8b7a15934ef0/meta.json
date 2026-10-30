@@ -1,0 +1,6 @@
+{
+  "key": "6dd9205ebacda5023c8fb411a3ad5f2dec6389e7223d74085bbe8b7a15934ef0",
+  "llvm_writes": 1,
+  "ll_path": "/home/jmdiez/Trabajo/demonodojo/opencode-sal/target/incremental/6dd9205ebacda5023c8fb411a3ad5f2dec6389e7223d74085bbe8b7a15934ef0/module.ll",
+  "obj_path": "/home/jmdiez/Trabajo/demonodojo/opencode-sal/target/incremental/6dd9205ebacda5023c8fb411a3ad5f2dec6389e7223d74085bbe8b7a15934ef0/module.o"
+}

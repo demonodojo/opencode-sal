@@ -1,0 +1,10 @@
+import "../../sal/std/soso/fs.sal"
+
+fn session_path(id: String) -> String ! alloc
+    "/var/opencode/sessions/" + id + "/state.json"
+
+fn session_save(id: String, body: String) -> Int ! io, alloc
+    write_file_path(session_path(id), body)
+
+fn session_load(id: String) -> String ! io, alloc
+    read_file(session_path(id))

@@ -1,0 +1,14 @@
+import "../../sal/std/soso/fs.sal"
+import "../../sal/std/soso/process.sal"
+
+fn tool_read(path: String) -> String ! io, alloc
+    read_file(path)
+
+fn tool_write(path: String, data: String) -> Int ! io, alloc
+    write_file_path(path, data)
+
+fn tool_grep(_pat: String, _path: String) -> String ! alloc
+    "(grep integrado)"
+
+fn tool_bash(_cmd: String) -> Int ! io, alloc
+    spawn_io_full("/bin/sosh", 0, 1, 2, -1)

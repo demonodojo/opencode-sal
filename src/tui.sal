@@ -1,0 +1,5 @@
+import "../../sal/std/soso/io.sal"
+
+fn tui_loop() -> Int ! io, alloc
+    write_str_fd(1, "opencode TUI (stub)\n")
+    0

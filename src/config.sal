@@ -1,0 +1,17 @@
+import "../../sal/std/soso/fs.sal"
+
+fn config_base_url() -> String ! io, alloc
+    raw = read_file("opencode.json")
+    if str_contains(raw, "127.0.0.1:7422") != 0
+        "http://127.0.0.1:7422"
+    else
+        if str_contains(raw, "127.0.0.1:7442") != 0
+            "http://127.0.0.1:7442"
+        else
+            "http://127.0.0.1:7422"
+
+fn config_model() -> String
+    "soso-coder"
+
+fn agents_md() -> String ! io, alloc
+    read_file("AGENTS.md")

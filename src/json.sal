@@ -1,0 +1,8 @@
+fn json_esc(s: String) -> String ! alloc
+    s
+
+fn json_emit_line(kind: String, payload: String) -> String ! alloc
+    "event:" + kind + " text:" + json_esc(payload) + "\n"
+
+fn json_emit_done() -> String
+    "event:done\n"

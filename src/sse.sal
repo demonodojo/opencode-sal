@@ -1,0 +1,8 @@
+fn sse_has_data(block: String) -> Int ! alloc
+    if str_contains(block, "data:") != 0
+        1
+    else
+        0
+
+fn sse_stub_content() -> String
+    "choices"
