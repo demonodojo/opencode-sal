@@ -33,6 +33,9 @@ jobs:
       - name: Instalar Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Sincronizar sal-source.lock con el checkout Sal
+        run: SOSO_SAL_SOURCE="${{ github.workspace }}/sal" python3 soso/scripts/sal-source.py --update
+
       - name: Build y pruebas
         working-directory: opencode-sal
         env:
