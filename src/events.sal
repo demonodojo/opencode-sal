@@ -1,5 +1,18 @@
 import "strutil.sal"
-import "../../sal/std/soso/io.sal"
+import "io/io.sal"
+
+fn oc_tui_log_path() -> String
+    "/tmp/opencode-sal-tui.log"
+
+fn oc_tui_log_reset() -> Int ! io, alloc
+    write_file(oc_tui_log_path(), "")
+
+fn oc_tui_log_add(line: String) -> Int ! io, alloc
+    prev = read_file(oc_tui_log_path())
+    write_file(oc_tui_log_path(), prev + line + "\n")
+
+fn oc_tui_log_read() -> String ! io, alloc
+    read_file(oc_tui_log_path())
 
 fn oc_emit_json(line: String, json_out: Int) -> Int ! io, alloc
     if json_out == 1
@@ -30,44 +43,41 @@ fn oc_step_finish(json_out: Int, inp: Int, out: Int) -> Int ! io, alloc
 fn oc_tool_use(json_out: Int, call_id: String, tool: String, done: Int) -> Int ! io, alloc
     if json_out == 2
         if done == 0
-            write_str_fd(1, "tool " + tool + "\n")
+            oc_tui_log_add("tool " + tool)
         else
             0
+    elsif json_out == 1
+        q = json_quote_char()
+        lb = json_lbrace()
+        rb = json_rbrace()
+        st = q + "completed" + q
+        if done == 0
+            st = q + "running" + q
+        line = lb + q + "type" + q + ":" + q + "tool_use" + q + "," + q + "part" + q + ":" + lb + q + "callID" + q + ":" + q + call_id + q + "," + q + "tool" + q + ":" + q + tool + q + "," + q + "state" + q + ":" + lb + q + "status" + q + ":" + st + rb + rb + rb + "\n"
+        oc_emit_json(line, json_out)
     else
-        if json_out == 1
-            q = json_quote_char()
-            lb = json_lbrace()
-            rb = json_rbrace()
-            st = q + "completed" + q
-            if done == 0
-                st = q + "running" + q
-            line = lb + q + "type" + q + ":" + q + "tool_use" + q + "," + q + "part" + q + ":" + lb + q + "callID" + q + ":" + q + call_id + q + "," + q + "tool" + q + ":" + q + tool + q + "," + q + "state" + q + ":" + lb + q + "status" + q + ":" + st + rb + rb + rb + "\n"
-            oc_emit_json(line, json_out)
-        else
-            0
+        0
 
 fn oc_text(json_out: Int, text: String) -> Int ! io, alloc
     if json_out == 2
-        write_str_fd(1, text + "\n")
+        oc_tui_log_add(text)
+    elsif json_out == 1
+        q = json_quote_char()
+        lb = json_lbrace()
+        rb = json_rbrace()
+        line = lb + q + "type" + q + ":" + q + "text" + q + "," + q + "part" + q + ":" + lb + q + "text" + q + ":" + q + text + q + rb + rb + "\n"
+        oc_emit_json(line, json_out)
     else
-        if json_out == 1
-            q = json_quote_char()
-            lb = json_lbrace()
-            rb = json_rbrace()
-            line = lb + q + "type" + q + ":" + q + "text" + q + "," + q + "part" + q + ":" + lb + q + "text" + q + ":" + q + text + q + rb + rb + "\n"
-            oc_emit_json(line, json_out)
-        else
-            0
+        0
 
 fn oc_error(json_out: Int, msg: String) -> Int ! io, alloc
     if json_out == 2
-        write_str_fd(1, "error: " + msg + "\n")
+        oc_tui_log_add("error: " + msg)
+    elsif json_out == 1
+        q = json_quote_char()
+        lb = json_lbrace()
+        rb = json_rbrace()
+        line = lb + q + "type" + q + ":" + q + "error" + q + "," + q + "error" + q + ":" + lb + q + "name" + q + ":" + q + "Error" + q + "," + q + "data" + q + ":" + lb + q + "message" + q + ":" + q + msg + q + rb + rb + rb + "\n"
+        oc_emit_json(line, json_out)
     else
-        if json_out == 1
-            q = json_quote_char()
-            lb = json_lbrace()
-            rb = json_rbrace()
-            line = lb + q + "type" + q + ":" + q + "error" + q + "," + q + "error" + q + ":" + lb + q + "name" + q + ":" + q + "Error" + q + "," + q + "data" + q + ":" + lb + q + "message" + q + ":" + q + msg + q + rb + rb + rb + "\n"
-            oc_emit_json(line, json_out)
-        else
-            0
+        0

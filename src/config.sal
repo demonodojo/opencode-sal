@@ -1,4 +1,4 @@
-import "../../sal/std/soso/fs.sal"
+import "io/fs.sal"
 import "skills.sal"
 
 fn config_port() -> Int ! io, alloc

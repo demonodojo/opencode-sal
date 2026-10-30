@@ -1,6 +1,3 @@
 [package]
 name = "opencode-sal"
-version = "0.4.0"
-
-[dependencies]
-soso = { path = "../sal/std/soso" }
+version = "0.4.1"

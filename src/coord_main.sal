@@ -1,5 +1,5 @@
 import "coord/campana.sal"
-import "../../sal/std/soso/io.sal"
+import "io/io.sal"
 
 fn main() -> Int ! io, alloc
     if argc() < 3

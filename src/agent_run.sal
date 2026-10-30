@@ -5,7 +5,7 @@ import "parse.sal"
 import "events.sal"
 import "tools.sal"
 import "session.sal"
-import "../../sal/std/soso/io.sal"
+import "io/io.sal"
 
 fn run_agent_turn(prompt: String, json_out: Int, max_turns: Int, session_id: String, turn: Int, resp: String, last_user: String) -> Int ! io, alloc
     if turn >= max_turns

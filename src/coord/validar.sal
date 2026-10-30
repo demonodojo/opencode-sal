@@ -1,4 +1,4 @@
-import "../../../sal/std/soso/fs.sal"
+import "io/fs.sal"
 
 fn validar_copia(dir: String) -> Int ! io, alloc
     write_file_path(dir + "/verificado", "ok\n")

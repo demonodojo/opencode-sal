@@ -18,16 +18,10 @@ jobs:
           repository: demonodojo/soso
           path: soso
 
-      - name: Pin Sal (config/sal-source.lock de soso)
-        id: sal_pin
-        run: |
-          BASE=$(grep '^base=' soso/config/sal-source.lock | cut -d= -f2)
-          echo "ref=$BASE" >> "$GITHUB_OUTPUT"
-
       - uses: actions/checkout@v4
         with:
           repository: demonodojo/sal
-          ref: ${{ steps.sal_pin.outputs.ref }}
+          ref: main
           path: sal
 
       - name: Instalar Rust

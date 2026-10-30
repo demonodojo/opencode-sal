@@ -1,8 +1,218 @@
 import "agent_run.sal"
-import "../../sal/std/soso/io.sal"
+import "io/io.sal"
 
 fn tui_eof_marker() -> String
     "###TUI_EOF###"
+
+fn tui_esc(seq: String) -> String ! alloc
+    char_to_str(27) + seq
+
+fn tui_dim() -> String ! alloc
+    tui_esc("[90m")
+
+fn tui_bold() -> String ! alloc
+    tui_esc("[1m")
+
+fn tui_reset() -> String ! alloc
+    tui_esc("[0m")
+
+fn tui_cyan() -> String ! alloc
+    tui_esc("[36m")
+
+fn tui_green() -> String ! alloc
+    tui_esc("[32m")
+
+fn tui_bg() -> String ! alloc
+    tui_esc("[48;5;236m")
+
+fn tui_cup(row: Int, col: Int) -> String ! alloc
+    tui_esc("[" + int_to_str(row) + ";" + int_to_str(col) + "H")
+
+fn tui_nl(s: String) -> Int ! io, alloc
+    write_str_fd(1, s + "\n")
+
+fn tui_blanks(n: Int) -> Int ! io, alloc
+    if n <= 0
+        0
+    else
+        _w = tui_nl("")
+        tui_blanks(n - 1)
+
+fn tui_pad(s: String, w: Int) -> String ! alloc
+    if str_len(s) >= w
+        s
+    else
+        tui_pad(s + " ", w)
+
+fn tui_spaces(n: Int) -> String ! alloc
+    if n <= 0
+        ""
+    else
+        " " + tui_spaces(n - 1)
+
+fn tui_clear() -> Int ! io, alloc
+    write_str_fd(1, tui_esc("[2J") + tui_esc("[H") + tui_esc("[?25l"))
+
+fn tui_enter() -> Int ! io, alloc
+    write_str_fd(1, tui_esc("[?1049h"))
+
+fn tui_leave() -> Int ! io, alloc
+    _w = write_str_fd(1, tui_esc("[?25h") + tui_esc("[?1049l") + "\n")
+    0
+
+fn tui_logo_row(left: String, right: String) -> Int ! io, alloc
+    tui_nl("                  " + tui_dim() + left + tui_reset() + tui_bold() + right + tui_reset())
+
+fn tui_logo() -> Int ! io, alloc
+    _a = tui_logo_row("                    ", " ▄")
+    _b = tui_logo_row("█▀▀█ █▀▀█ █▀▀█ █▀▀▄ ", "█▀▀▀ █▀▀█ █▀▀█ █▀▀█")
+    _c = tui_logo_row("█░░█ █░░█ █▀▀▀ █░░█ ", "█░░░ █░░█ █░░█ █▀▀▀")
+    tui_logo_row("▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀▀▀▀ ", "▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀")
+
+fn tui_bar_row(extra: String, side_on: Int, side: String) -> String ! alloc
+    head = "    " + tui_cyan() + "┃" + tui_reset()
+    if side_on == 0
+        head + extra
+    else
+        head + tui_pad(extra, 49) + "  " + side
+
+fn tui_agent_row(side_on: Int, side: String) -> String ! alloc
+    model = config_model()
+    plain = 14 + str_len(model)
+    head = "    " + tui_cyan() + "┃" + tui_reset() + "  " + tui_cyan() + "Build" + tui_reset() + "  " + model
+    if side_on == 0
+        head
+    else
+        gap = 0
+        if plain < 54
+            gap = 54 - plain
+        head + tui_spaces(gap) + "  " + side
+
+fn tui_stem_row(side_on: Int) -> String ! alloc
+    head = "    " + tui_cyan() + "╹" + tui_reset()
+    if side_on == 0
+        head
+    else
+        head + tui_spaces(49) + "  "
+
+fn tui_hint_row(side_on: Int) -> String ! alloc
+    head = "    " + tui_dim() + "exit  leave" + tui_reset()
+    if side_on == 0
+        head
+    else
+        mark = tui_green() + "• " + tui_reset() + tui_bold() + "OpenCode" + tui_reset() + "  " + tui_dim() + "0.4.1" + tui_reset()
+        head + tui_spaces(39) + "  " + mark
+
+fn tui_prompt_block(top: Int, side_on: Int) -> Int ! io, alloc
+    _a = tui_nl(tui_bar_row("", side_on, ""))
+    _b = tui_nl(tui_bar_row("  ", side_on, ""))
+    _c = tui_nl(tui_agent_row(side_on, ""))
+    _d = tui_nl(tui_stem_row(side_on))
+    _e = tui_nl(tui_hint_row(side_on))
+    write_str_fd(1, tui_esc("[?25h") + tui_cup(top + 1, 8))
+
+fn tui_draw_home() -> Int ! io, alloc
+    _c = tui_clear()
+    _b = tui_blanks(3)
+    _l = tui_logo()
+    _g = tui_nl("")
+    tui_prompt_block(9, 0)
+
+fn tui_eol(s: String, i: Int, n: Int) -> Int ! alloc
+    if i >= n
+        n
+    elsif str_char(s, i) == 10
+        i
+    else
+        tui_eol(s, i + 1, n)
+
+fn tui_count_go(s: String, i: Int, acc: Int) -> Int ! alloc
+    n = str_len(s)
+    if i >= n
+        acc
+    else
+        end = tui_eol(s, i, n)
+        if end >= n
+            acc + 1
+        else
+            tui_count_go(s, end + 1, acc + 1)
+
+fn tui_count(s: String) -> Int ! alloc
+    tui_count_go(s, 0, 0)
+
+fn tui_skip(s: String, nskip: Int) -> String ! alloc
+    if nskip <= 0
+        s
+    else
+        n = str_len(s)
+        end = tui_eol(s, 0, n)
+        if end >= n
+            ""
+        else
+            tui_skip(str_slice(s, end + 1, n), nskip - 1)
+
+fn tui_tail(s: String) -> String ! alloc
+    c = tui_count(s)
+    if c <= 12
+        s
+    else
+        tui_skip(s, c - 12)
+
+fn tui_starts(s: String, p: String) -> Int ! alloc
+    n = str_len(p)
+    if str_len(s) < n
+        0
+    else
+        str_eq(str_slice(s, 0, n), p)
+
+fn tui_title() -> String ! alloc
+    tui_bold() + "default" + tui_reset()
+
+fn tui_user_row(text: String, side: String) -> String ! alloc
+    tui_bg() + tui_pad("  " + text, 54) + tui_reset() + "  " + side
+
+fn tui_tool_row(line: String, side: String) -> String ! alloc
+    plain = 6 + str_len(line)
+    head = "    " + tui_cyan() + "┃ " + tui_reset() + line
+    gap = 0
+    if plain < 54
+        gap = 54 - plain
+    head + tui_spaces(gap) + "  " + side
+
+fn tui_text_row(line: String, side: String) -> String ! alloc
+    tui_pad("      " + line, 54) + "  " + side
+
+fn tui_show_line(line: String, row: Int) -> String ! alloc
+    side = ""
+    if row == 2
+        side = tui_title()
+    if tui_starts(line, "U ") != 0
+        tui_user_row(str_slice(line, 2, str_len(line)), side)
+    elsif tui_starts(line, "tool ") != 0
+        tui_tool_row(line, side)
+    else
+        tui_text_row(line, side)
+
+fn tui_paint(s: String, i: Int, row: Int) -> Int ! io, alloc
+    n = str_len(s)
+    if i >= n
+        0
+    else
+        end = tui_eol(s, i, n)
+        line = str_slice(s, i, end)
+        _w = tui_nl(tui_show_line(line, row))
+        if end >= n
+            1
+        else
+            1 + tui_paint(s, end + 1, row + 1)
+
+fn tui_draw_session() -> Int ! io, alloc
+    _c = tui_clear()
+    _b = tui_nl("")
+    view = tui_tail(oc_tui_log_read())
+    n = tui_paint(view, 0, 2)
+    _g = tui_nl("")
+    tui_prompt_block(n + 3, 1)
 
 fn tui_read_line_go(acc: String) -> String ! io, alloc
     buf = bytes_new(1)
@@ -16,11 +226,10 @@ fn tui_read_line_go(acc: String) -> String ! io, alloc
         c = bytes_get_u8(buf, 0)
         if c == 10
             acc
+        elsif c == 13
+            acc
         else
-            if c == 13
-                acc
-            else
-                tui_read_line_go(acc + char_to_str(c))
+            tui_read_line_go(acc + char_to_str(c))
 
 fn tui_is_eof(line: String) -> Int ! alloc
     str_eq(line, tui_eof_marker())
@@ -28,34 +237,36 @@ fn tui_is_eof(line: String) -> Int ! alloc
 fn tui_is_quit(line: String) -> Int ! alloc
     if str_eq(line, "exit") != 0
         1
+    elsif str_eq(line, "quit") != 0
+        1
+    elsif str_eq(line, "/exit") != 0
+        1
+    elsif str_eq(line, "/quit") != 0
+        1
     else
-        if str_eq(line, "quit") != 0
-            1
-        else
-            0
-
-fn tui_banner() -> Int ! io, alloc
-    _a = write_str_fd(1, "opencode-sal  session default  model soso-coder\n")
-    write_str_fd(1, "(exit or quit to leave)\n")
+        0
 
 fn tui_loop_go(turn: Int) -> Int ! io, alloc
-    _p = write_str_fd(1, "> ")
+    if turn <= 0
+        _h = tui_draw_home()
+    else
+        _s = tui_draw_session()
     line = tui_read_line_go("")
     if tui_is_eof(line) != 0
-        0
+        tui_leave()
+    elsif tui_is_quit(line) != 0
+        tui_leave()
+    elsif str_len(line) <= 0
+        tui_loop_go(turn)
     else
-        if tui_is_quit(line) != 0
-            0
-        else
-            if str_len(line) <= 0
-                tui_loop_go(turn)
-            else
-                cont = 0
-                if turn > 0
-                    cont = 1
-                _r = run_once(line, 2, 40, "default", cont)
-                tui_loop_go(turn + 1)
+        _u = oc_tui_log_add("U " + line)
+        cont = 0
+        if turn > 0
+            cont = 1
+        _r = run_once(line, 2, 40, "default", cont)
+        tui_loop_go(turn + 1)
 
 fn tui_loop() -> Int ! io, alloc
-    _b = tui_banner()
+    _z = oc_tui_log_reset()
+    _e = tui_enter()
     tui_loop_go(0)

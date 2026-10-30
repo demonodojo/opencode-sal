@@ -1,10 +1,10 @@
 import "agent_run.sal"
 import "tui.sal"
-import "../../sal/std/soso/io.sal"
-import "../../sal/std/soso/process.sal"
+import "io/io.sal"
+import "io/process.sal"
 
 fn version_str() -> String
-    "opencode-sal 0.4.0"
+    "opencode-sal 0.4.1"
 
 fn scan_flags(i: Int, n: Int, fmt: Int, cont: Int, max_turns: Int) -> Int ! alloc
     if i >= n

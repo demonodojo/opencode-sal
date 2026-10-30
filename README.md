@@ -11,7 +11,7 @@ Reimplementación de OpenCode en Sal para soso ([D12](https://github.com/demonod
 Genera:
 
 - `out/bin/*` — ELF **soso** (guest; requiere SDK: `cargo xtask sal-build --cross-only` en repo `soso`).
-- `out/linux/bin/*` — binarios **Linux** nativos (`sal build --target linux`); misma fuente y `std/soso`, con shim de syscalls en el runtime Sal.
+- `out/linux/bin/*` — binarios **Linux** nativos (`sal build --target linux`); misma fuente y `sal_modules/io`, con shim de syscalls en el runtime Sal.
 
 Requiere `sal` en PATH (repo hermano `../sal`).
 
@@ -26,8 +26,8 @@ soso-pkg instalar opencode-sal
 
 ## Comandos
 
-- `opencode` — sesión interactiva por líneas (comando por defecto del OpenCode original); `exit`/`quit`/EOF para salir
-- `opencode --version` (0.4.0)
+- `opencode` — TUI (logo, sesión y compositor, como OpenCode); `exit`/`quit`/EOF para salir
+- `opencode --version` (0.4.1)
 - `opencode run [--format json] <prompt>` — bucle con herramientas, eventos JSON tipo OpenCode (`step_start`, `tool_use`, `text`, `step_finish`), HTTP a `soso-llm` (`opencode.json` → puerto 7422/7442)
 - `soso-improve-sal campana <dir>` — coordinador (captura, diez pasos, validación)
 - `opencode reinstalar` — reinstala vía `soso-pkg` (borrador)
@@ -59,7 +59,7 @@ Pruebas HTTP usan servidor mock local; no llaman a modelos reales en CI.
 La versión canónica está en [`Sal.toml`](Sal.toml) (y en `version_str` de [`src/main.sal`](src/main.sal)).
 
 1. Sube la versión en `Sal.toml` y `src/main.sal`.
-2. Crea y empuja el tag que coincida: `git tag v0.4.0 && git push origin v0.4.0`.
+2. Crea y empuja el tag que coincida: `git tag v0.4.1 && git push origin v0.4.1`.
 
 El workflow [`.github/workflows/release.yml`](.github/workflows/release.yml) construye y adjunta:
 

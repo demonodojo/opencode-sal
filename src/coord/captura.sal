@@ -1,4 +1,4 @@
-import "../../../sal/std/soso/fs.sal"
+import "io/fs.sal"
 
 fn captura_base(out_dir: String) -> Int ! io, alloc
     write_file_path(out_dir + "/base.txt", "capturado\n")

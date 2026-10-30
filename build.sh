@@ -19,7 +19,7 @@ build_one() {
 }
 
 build_one soso "$root/out/bin"
-# Binarios nativos Linux (misma std/soso; runtime emula la ABI en host).
+# Binarios nativos Linux (misma sal_modules/io; runtime emula la ABI en host).
 unset SAL_SDK
 build_one linux "$root/out/linux/bin"
 

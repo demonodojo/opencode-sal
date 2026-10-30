@@ -1,5 +1,5 @@
-import "../../sal/std/soso/fs.sal"
-import "../../sal/std/soso/process.sal"
+import "io/fs.sal"
+import "io/process.sal"
 import "strutil.sal"
 import "fs_list.sal"
 import "parse.sal"

@@ -1,4 +1,4 @@
-import "../../sal/std/soso/fs.sal"
+import "io/fs.sal"
 
 fn skill_load(path: String) -> String ! io, alloc
     read_file(path)

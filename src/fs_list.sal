@@ -1,6 +1,6 @@
-import "../../sal/std/soso/abi.sal"
-import "../../sal/std/soso/fs.sal"
-import "../../sal/std/soso/io.sal"
+import "io/abi.sal"
+import "io/fs.sal"
+import "io/io.sal"
 
 fn dent_name_chars(db: Bytes, off: Int, nl: Int, i: Int, acc: String) -> String ! alloc
     if i >= nl

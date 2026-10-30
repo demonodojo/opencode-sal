@@ -1,5 +1,5 @@
-import "../../sal/std/soso/io.sal"
-import "../../sal/std/soso/net.sal"
+import "io/io.sal"
+import "io/net.sal"
 
 fn http_bytes_to_str(b: Bytes, i: Int, n: Int, acc: String) -> String ! alloc
     if i >= n

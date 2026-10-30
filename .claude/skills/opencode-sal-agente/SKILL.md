@@ -10,7 +10,7 @@ description: >-
 
 # Agente `opencode`
 
-Binario `out/linux/bin/opencode` en el host y `out/bin/opencode` en el guest. Versión impresa: `opencode-sal 0.4.0` (`version_str` en `src/main.sal`). `Sal.toml` lleva la misma versión de paquete (`0.4.0`).
+Binario `out/linux/bin/opencode` en el host y `out/bin/opencode` en el guest. Versión impresa: `opencode-sal 0.4.1` (`version_str` en `src/main.sal`). `Sal.toml` lleva la misma versión de paquete (`0.4.1`).
 
 ## CLI
 
@@ -21,7 +21,7 @@ opencode run [--format json] [--session ID] [--continue] [--max-turns N] PROMPT
 opencode reinstalar
 ```
 
-Sin argumentos entra en la sesión interactiva (`tui_loop` en `src/tui.sal`): banner, prompt `> `, cada línea llama a `run_once` con salida humana (`json_out == 2` en `src/events.sal`: líneas `tool <nombre>` y texto del asistente). Tras el primer mensaje, los turnos siguientes usan `--continue` vía `session_continue_prompt`. `exit`, `quit` o EOF (Ctrl-D) salen 0; línea vacía repite el prompt. Otro subcomando desconocido sale 2 con el uso en stderr.
+Sin argumentos entra en el TUI (`tui_loop` en `src/tui.sal`), pantalla alternativa ANSI. Antes del primer mensaje: logo OPEN CODE centrado y compositor (barra izquierda, agente `Build`, modelo `soso-coder`). Después: sesión con el mensaje del usuario, la línea `tool <nombre>`, el texto del asistente y una columna con el título `default` y `OpenCode 0.4.1`. `json_out == 2` no escribe esas líneas en bruto: las acumula en `/tmp/opencode-sal-tui.log` y el TUI las pinta. Tras el primer mensaje, los turnos siguientes usan `--continue` vía `session_continue_prompt`. `exit`, `quit`, `/exit`, `/quit` o EOF (Ctrl-D) salen 0; línea vacía repinta. Otro subcomando desconocido sale 2 con el uso en stderr.
 
 `run` empaqueta flags en un entero (`scan_flags`): formato, `--continue` y `--max-turns` (default 40). `--session` por defecto es `default`. El prompt es el último argumento; si es `json` o contiene `--`, el prompt queda `hello`. Con menos de 3 argumentos el prompt también es `hello`.
 

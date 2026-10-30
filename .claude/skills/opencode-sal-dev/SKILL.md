@@ -19,7 +19,7 @@ Reimplementación compatible de OpenCode en Sal. Decisión D12 en el repo herman
 | `src/coord_main.sal` | CLI `soso-improve-sal` |
 | `src/*.sal` | Bucle, HTTP, JSON, herramientas, sesión, skills |
 | `src/coord/*.sal` | Campaña: captura, ejecutor, validador |
-| `Sal.toml` | Dependencia `soso` en `../sal/std/soso` |
+| `sal_modules/io/` | E/S del proyecto; imports `import "io/io.sal"` (etc.) |
 | `out/bin/` | ELF guest (`--target soso`) |
 | `out/linux/bin/` | Binarios Linux (`--target linux`) |
 | `tests/` | Mock HTTP y humo |

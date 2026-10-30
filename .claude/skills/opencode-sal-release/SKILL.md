@@ -87,7 +87,7 @@ Confirmar que existen los dos archivos y que `tar tzf` lista `bin/opencode` en a
 |---------|--------|
 | Release falla en «tag no coincide» | Tag `vA.B.C` distinto de `Sal.toml` |
 | `release-build.sh` falla | Sin SDK: `cargo xtask sal-build --cross-only` en `../soso` |
-| CI: checkout Sal no coincide con lock | En Actions, `sal` debe checkout en el `base=` de `../soso/config/sal-source.lock` |
+| CI: import `fs.sal` no encontrado | El pin viejo de `sal` en soso no basta; CI usa `demonodojo/sal@main` y `sal-source.py --update` antes de `sal-build` |
 | `--version` distinto de `Sal.toml` | Olvidado `version_str` en `main.sal` |
 | CI verde pero sin Release | Solo se mergeó a `main` sin push del tag `vX.Y.Z` |
 

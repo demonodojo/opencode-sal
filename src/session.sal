@@ -1,4 +1,4 @@
-import "../../sal/std/soso/fs.sal"
+import "io/fs.sal"
 
 fn session_path(id: String) -> String ! alloc
     "/var/opencode/sessions/" + id + "/state.json"
