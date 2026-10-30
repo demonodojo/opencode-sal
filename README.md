@@ -11,7 +11,7 @@ Reimplementación de OpenCode en Sal para soso ([D12](https://github.com/demonod
 Genera:
 
 - `out/bin/*` — ELF **soso** (guest; requiere SDK: `cargo xtask sal-build --cross-only` en repo `soso`).
-- `out/linux/bin/*` — binarios **Linux** nativos (`sal build --target linux`); misma fuente y `sal_modules/io`, con shim de syscalls en el runtime Sal.
+- `out/linux/bin/*` — binarios **Linux** nativos (`sal build --target linux`); misma fuente, `import "io/…"`, con shim de syscalls en el runtime Sal.
 
 Requiere `sal` en PATH (repo hermano `../sal`).
 
