@@ -53,3 +53,19 @@ opencode run --format json "lee /tmp/oc-fixture.txt"
 ```
 
 Pruebas HTTP usan servidor mock local; no llaman a modelos reales en CI.
+
+## Release (CI)
+
+La versión canónica está en [`Sal.toml`](Sal.toml) (y en `version_str` de [`src/main.sal`](src/main.sal)).
+
+1. Sube la versión en `Sal.toml` y `src/main.sal`.
+2. Crea y empuja el tag que coincida: `git tag v0.4.0 && git push origin v0.4.0`.
+
+El workflow [`.github/workflows/release.yml`](.github/workflows/release.yml) construye y adjunta:
+
+| Artefacto | Contenido |
+|-----------|-----------|
+| `opencode-sal-<ver>-linux-x86_64.tar.gz` | `out/linux/bin/opencode`, `soso-improve-sal`, `VERSION` |
+| `opencode-sal-<ver>-soso-pkg.tar.gz` | Paquete `soso-pkg` (`paquete.txt`, `paquete.pack`, `bin/`, `share/opencode/VERSION`) |
+
+Empaquetado local: `./scripts/release-build.sh` (requiere repos hermanos `../sal` y `../soso`).

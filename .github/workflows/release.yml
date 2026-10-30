@@ -1,0 +1,73 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: opencode-sal
+
+      - uses: actions/checkout@v4
+        with:
+          repository: demonodojo/sal
+          path: sal
+
+      - uses: actions/checkout@v4
+        with:
+          repository: demonodojo/soso
+          path: soso
+
+      - name: Instalar Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Comprobar tag vs Sal.toml
+        id: meta
+        working-directory: opencode-sal
+        run: |
+          chmod +x scripts/ci-version.sh
+          VER=$(./scripts/ci-version.sh)
+          REF_TAG="${GITHUB_REF#refs/tags/}"
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            if [[ "$REF_TAG" != "v$VER" ]]; then
+              echo "El tag $REF_TAG no coincide con Sal.toml ($VER)" >&2
+              exit 1
+            fi
+          fi
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "tag_name=v$VER" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag_name=$REF_TAG" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build artefactos
+        working-directory: opencode-sal
+        env:
+          SAL_ROOT: ${{ github.workspace }}/sal
+          SOSO_ROOT: ${{ github.workspace }}/soso
+        run: |
+          chmod +x scripts/*.sh build.sh
+          ./scripts/release-build.sh
+          ls -la dist/
+
+      - name: Publicar GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag_name }}
+          name: opencode-sal ${{ steps.meta.outputs.version }}
+          generate_release_notes: true
+          files: |
+            opencode-sal/dist/opencode-sal-${{ steps.meta.outputs.version }}-linux-x86_64.tar.gz
+            opencode-sal/dist/opencode-sal-${{ steps.meta.outputs.version }}-soso-pkg.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -13,6 +13,7 @@ Editar una vez. Sustituir el enlace por un directorio crea una copia que hay que
 | Skill | Cuándo |
 |-------|--------|
 | `opencode-sal-dev` | Compilar, probar, layout, empaquetado |
+| `opencode-sal-release` | Subir versión, tag `vX.Y.Z`, GitHub Release y artefactos |
 | `opencode-sal-agente` | CLI `opencode`, bucle, herramientas, eventos JSON, HTTP |
 | `opencode-sal-campana` | `soso-improve-sal campana` |
 

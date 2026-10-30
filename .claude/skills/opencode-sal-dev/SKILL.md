@@ -57,7 +57,12 @@ python3 tests/mock_http_server.py 7422 edit     # read, edit, content
 out/linux/bin/opencode run --format json --max-turns 1 "prompt"
 ```
 
-El mock escucha en `127.0.0.1`, atiende una conexión por respuesta y cierra. Puerto por defecto `7422`. `probar_http.sh` construye, arranca el mock, imprime `--version` y las cinco primeras líneas de `run --format json`.
+El mock escucha en `127.0.0.1`, atiende una conexión por respuesta y cierra. Puerto por defecto `7422`. `probar_http.sh` construye, arranca el mock, imprime `--version` y las cinco primeras líneas de `run --format json`. `probar_tui.sh` prueba la sesión sin argumentos.
+
+## CI y release
+
+- [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml): en cada PR/push a `main`, checkout de `demonodojo/sal` y `demonodojo/soso`, `scripts/release-build.sh`, `probar_http.sh` y `probar_tui.sh`.
+- Publicar versión nueva: skill [opencode-sal-release](../opencode-sal-release/SKILL.md) (tag, Release, artefactos).
 
 ## Fuentes `.sal`
 

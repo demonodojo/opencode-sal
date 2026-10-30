@@ -1,0 +1,38 @@
+name: ci
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: opencode-sal
+
+      - uses: actions/checkout@v4
+        with:
+          repository: demonodojo/sal
+          path: sal
+
+      - uses: actions/checkout@v4
+        with:
+          repository: demonodojo/soso
+          path: soso
+
+      - name: Instalar Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build y pruebas
+        working-directory: opencode-sal
+        env:
+          SAL_ROOT: ${{ github.workspace }}/sal
+          SOSO_ROOT: ${{ github.workspace }}/soso
+        run: |
+          chmod +x scripts/*.sh build.sh tests/*.sh
+          ./scripts/release-build.sh
+          ./tests/probar_http.sh
+          ./tests/probar_tui.sh
