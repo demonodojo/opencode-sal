@@ -1,4 +1,5 @@
 import "agent_run.sal"
+import "tui.sal"
 import "../../sal/std/soso/io.sal"
 import "../../sal/std/soso/process.sal"
 
@@ -58,8 +59,7 @@ fn last_arg_prompt(n: Int) -> String ! alloc
 
 fn main() -> Int ! io, alloc
     if argc() < 2
-        _v = write_str_fd(1, version_str() + "\n")
-        0
+        tui_loop()
     else
         a1 = argv(1)
         if str_eq(a1, "--version") != 0

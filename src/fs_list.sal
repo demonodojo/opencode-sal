@@ -1,0 +1,55 @@
+import "../../sal/std/soso/abi.sal"
+import "../../sal/std/soso/fs.sal"
+import "../../sal/std/soso/io.sal"
+
+fn dent_name_chars(db: Bytes, off: Int, nl: Int, i: Int, acc: String) -> String ! alloc
+    if i >= nl
+        acc
+    else
+        dent_name_chars(db, off, nl, i + 1, acc + char_to_str(bytes_get_u8(db, off + i)))
+
+fn dent_entry_name(dent_p: Int, dent_cap: Int, pos: Int) -> String ! alloc
+    db = bytes_view_mem(dent_p, dent_cap)
+    nl = bytes_get_u8(db, pos + dirent_off_name_len())
+    if nl <= 0
+        ""
+    else
+        if nl == 1
+            if bytes_get_u8(db, pos + dirent_off_name()) == 46
+                ""
+            else
+                dent_name_chars(db, pos + dirent_off_name(), nl, 0, "")
+        else
+            if nl == 2
+                nm = pos + dirent_off_name()
+                if bytes_get_u8(db, nm) == 46
+                    if bytes_get_u8(db, nm + 1) == 46
+                        ""
+                    else
+                        dent_name_chars(db, nm, nl, 0, "")
+                else
+                    dent_name_chars(db, nm, nl, 0, "")
+            else
+                dent_name_chars(db, pos + dirent_off_name(), nl, 0, "")
+
+fn list_dir_first(dent_p: Int, dent_cap: Int, got: Int, pos: Int) -> String ! alloc
+    if pos + dirent_size() > got
+        ""
+    else
+        nm = dent_entry_name(dent_p, dent_cap, pos)
+        if str_len(nm) > 0
+            nm
+        else
+            list_dir_first(dent_p, dent_cap, got, pos + dirent_size())
+
+fn list_dir(path: String) -> String ! io, alloc
+    fd = open_read(path)
+    if fd < 0
+        ""
+    else
+        dent_cap = dirent_size() * 32
+        dent = bytes_new(dent_cap)
+        dent_p = bytes_ptr(dent)
+        got = getdents_fd(fd, dent_p, dent_cap)
+        _c = close_fd(fd)
+        list_dir_first(dent_p, dent_cap, got, 0)

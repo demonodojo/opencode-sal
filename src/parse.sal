@@ -1,0 +1,78 @@
+import "strutil.sal"
+
+fn resp_has_tool_calls(body: String) -> Int ! alloc
+    if str_contains(body, "tool_calls") != 0
+        1
+    else
+        if str_contains(body, "function") != 0
+            1
+        else
+            0
+
+fn resp_tool_name(body: String) -> String ! alloc
+    if str_contains(body, "reemplazar_texto") != 0
+        "reemplazar_texto"
+    else
+        if str_contains(body, "edit") != 0
+            "edit"
+        else
+            if str_contains(body, "glob") != 0
+                "glob"
+            else
+                if str_contains(body, "list") != 0
+                    "list"
+                else
+                    if str_contains(body, "bash") != 0
+                        "bash"
+                    else
+                        if str_contains(body, "grep") != 0
+                            "grep"
+                        else
+                            if str_contains(body, "write") != 0
+                                "write"
+                            else
+                                if str_contains(body, "read") != 0
+                                    "read"
+                                else
+                                    "unknown"
+
+fn resp_assistant_text(body: String) -> String ! alloc
+    extract_quoted_after(body, "content\":\"")
+
+fn resp_tool_path(body: String) -> String ! alloc
+    p = extract_quoted_after(body, "path\":\"")
+    if str_len(p) > 0
+        p
+    else
+        p2 = extract_quoted_after(body, "file_path\":\"")
+        if str_len(p2) > 0
+            p2
+        else
+            extract_quoted_after(body, "directory\":\"")
+
+fn resp_tool_old(body: String) -> String ! alloc
+    o = extract_quoted_after(body, "old_string\":\"")
+    if str_len(o) > 0
+        o
+    else
+        extract_quoted_after(body, "oldText\":\"")
+
+fn resp_tool_new(body: String) -> String ! alloc
+    n = extract_quoted_after(body, "new_string\":\"")
+    if str_len(n) > 0
+        n
+    else
+        extract_quoted_after(body, "newText\":\"")
+
+fn resp_tool_content(body: String) -> String ! alloc
+    extract_quoted_after(body, "content\":\"")
+
+fn resp_tool_pattern(body: String) -> String ! alloc
+    p = extract_quoted_after(body, "pattern\":\"")
+    if str_len(p) > 0
+        p
+    else
+        extract_quoted_after(body, "glob\":\"")
+
+fn resp_tool_command(body: String) -> String ! alloc
+    extract_quoted_after(body, "command\":\"")

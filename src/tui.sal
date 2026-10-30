@@ -1,5 +1,61 @@
+import "agent_run.sal"
 import "../../sal/std/soso/io.sal"
 
+fn tui_eof_marker() -> String
+    "###TUI_EOF###"
+
+fn tui_read_line_go(acc: String) -> String ! io, alloc
+    buf = bytes_new(1)
+    n = read_fd(0, bytes_ptr(buf), 1)
+    if n <= 0
+        if str_len(acc) <= 0
+            tui_eof_marker()
+        else
+            acc
+    else
+        c = bytes_get_u8(buf, 0)
+        if c == 10
+            acc
+        else
+            if c == 13
+                acc
+            else
+                tui_read_line_go(acc + char_to_str(c))
+
+fn tui_is_eof(line: String) -> Int ! alloc
+    str_eq(line, tui_eof_marker())
+
+fn tui_is_quit(line: String) -> Int ! alloc
+    if str_eq(line, "exit") != 0
+        1
+    else
+        if str_eq(line, "quit") != 0
+            1
+        else
+            0
+
+fn tui_banner() -> Int ! io, alloc
+    _a = write_str_fd(1, "opencode-sal  session default  model soso-coder\n")
+    write_str_fd(1, "(exit or quit to leave)\n")
+
+fn tui_loop_go(turn: Int) -> Int ! io, alloc
+    _p = write_str_fd(1, "> ")
+    line = tui_read_line_go("")
+    if tui_is_eof(line) != 0
+        0
+    else
+        if tui_is_quit(line) != 0
+            0
+        else
+            if str_len(line) <= 0
+                tui_loop_go(turn)
+            else
+                cont = 0
+                if turn > 0
+                    cont = 1
+                _r = run_once(line, 2, 40, "default", cont)
+                tui_loop_go(turn + 1)
+
 fn tui_loop() -> Int ! io, alloc
-    write_str_fd(1, "opencode TUI (stub)\n")
-    0
+    _b = tui_banner()
+    tui_loop_go(0)
