@@ -10,7 +10,7 @@ description: >-
 
 # Agente `opencode`
 
-Binario `out/linux/bin/opencode` en el host y `out/bin/opencode` en el guest. Versión impresa: `opencode-sal 0.3.0` (`version_str` en `src/main.sal`). `Sal.toml` lleva `0.1.0`; son campos distintos.
+Binario `out/linux/bin/opencode` en el host y `out/bin/opencode` en el guest. Versión impresa: `opencode-sal 0.4.0` (`version_str` en `src/main.sal`). `Sal.toml` lleva la misma versión de paquete (`0.4.0`).
 
 ## CLI
 

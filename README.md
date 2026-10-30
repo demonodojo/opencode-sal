@@ -27,7 +27,7 @@ soso-pkg instalar opencode-sal
 ## Comandos
 
 - `opencode` — sesión interactiva por líneas (comando por defecto del OpenCode original); `exit`/`quit`/EOF para salir
-- `opencode --version` (0.3.0)
+- `opencode --version` (0.4.0)
 - `opencode run [--format json] <prompt>` — bucle con herramientas, eventos JSON tipo OpenCode (`step_start`, `tool_use`, `text`, `step_finish`), HTTP a `soso-llm` (`opencode.json` → puerto 7422/7442)
 - `soso-improve-sal campana <dir>` — coordinador (captura, diez pasos, validación)
 - `opencode reinstalar` — reinstala vía `soso-pkg` (borrador)
