@@ -1,7 +1,18 @@
 import "../../sal/std/soso/fs.sal"
 
-fn skill_load(name: String) -> String ! io, alloc
-    read_file(".opencode/skills/" + name + "/SKILL.md")
+fn skill_load(path: String) -> String ! io, alloc
+    read_file(path)
+
+fn skills_append_default(base: String) -> String ! io, alloc
+    s1 = skill_load(".opencode/skills/soso-self-improvement/SKILL.md")
+    if str_len(s1) > 0
+        base + "\n\n--- skill ---\n" + s1
+    else
+        s2 = skill_load(".claude/skills/soso-self-improvement/SKILL.md")
+        if str_len(s2) > 0
+            base + "\n\n--- skill ---\n" + s2
+        else
+            base
 
 fn sal_tool_manifest(path: String) -> String ! io, alloc
     read_file(path)

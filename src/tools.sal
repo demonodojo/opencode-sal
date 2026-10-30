@@ -1,5 +1,8 @@
 import "../../sal/std/soso/fs.sal"
 import "../../sal/std/soso/process.sal"
+import "strutil.sal"
+import "fs_list.sal"
+import "parse.sal"
 
 fn tool_read(path: String) -> String ! io, alloc
     read_file(path)
@@ -7,8 +10,86 @@ fn tool_read(path: String) -> String ! io, alloc
 fn tool_write(path: String, data: String) -> Int ! io, alloc
     write_file_path(path, data)
 
-fn tool_grep(_pat: String, _path: String) -> String ! alloc
-    "(grep integrado)"
+fn tool_edit(path: String, old: String, new: String) -> Int ! io, alloc
+    reemplazar_texto(path, old, new)
 
-fn tool_bash(_cmd: String) -> Int ! io, alloc
-    spawn_io_full("/bin/sosh", 0, 1, 2, -1)
+fn tool_grep(pat: String, path: String) -> String ! io, alloc
+    body = read_file(path)
+    if str_contains(body, pat) != 0
+        "match"
+    else
+        ""
+
+fn reemplazar_texto(path: String, old: String, new: String) -> Int ! io, alloc
+    body = read_file(path)
+    if str_len(old) <= 0
+        1
+    else
+        if str_contains(body, old) == 0
+            1
+        else
+            idx = str_index_of(body, old)
+            if idx < 0
+                1
+            else
+                olen = str_len(old)
+                prefix = str_slice(body, 0, idx)
+                suffix = str_slice(body, idx + olen, str_len(body))
+                out = prefix + new + suffix
+                write_file_path(path, out)
+
+fn tool_list(path: String) -> String ! io, alloc
+    list_dir(path)
+
+fn tool_glob(pat: String, dir: String) -> String ! io, alloc
+    all = list_dir(dir)
+    if str_len(pat) <= 0
+        all
+    else
+        if str_contains(all, pat) != 0
+            all
+        else
+            ""
+
+fn tool_bash(cmd: String) -> String ! io, alloc
+    if str_len(cmd) <= 0
+        "empty"
+    else
+        _p = spawn_io_4("/bin/sosh", cmd, "", "", 0, 1, 2, -1)
+        "started"
+
+fn tool_dispatch(name: String, path: String, body: String) -> String ! io, alloc
+    if str_eq(name, "read") != 0
+        tool_read(path)
+    else
+        if str_eq(name, "write") != 0
+            _w = tool_write(path, body)
+            "ok"
+        else
+            if str_eq(name, "edit") != 0
+                old = resp_tool_old(body)
+                new = resp_tool_new(body)
+                _e = tool_edit(path, old, new)
+                "ok"
+            else
+                if str_eq(name, "reemplazar_texto") != 0
+                    old = resp_tool_old(body)
+                    new = resp_tool_new(body)
+                    _r = reemplazar_texto(path, old, new)
+                    "ok"
+                else
+                    if str_eq(name, "grep") != 0
+                        pat = resp_tool_pattern(body)
+                        tool_grep(pat, path)
+                    else
+                        if str_eq(name, "list") != 0
+                            tool_list(path)
+                        else
+                            if str_eq(name, "glob") != 0
+                                pat = resp_tool_pattern(body)
+                                tool_glob(pat, path)
+                            else
+                                if str_eq(name, "bash") != 0
+                                    tool_bash(resp_tool_command(body))
+                                else
+                                    "unsupported tool"

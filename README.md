@@ -2,13 +2,18 @@
 
 Reimplementación de OpenCode en Sal para soso ([D12](https://github.com/demonodojo/soso/blob/main/docs/self-improvement/DECISIONES.md)).
 
-## Build (host → ELF soso)
+## Build
 
 ```bash
 ./build.sh
 ```
 
-Requiere `sal` en PATH (repo hermano `../sal`) y SDK de soso (`cargo xtask sal-build --cross-only` en repo `soso`).
+Genera:
+
+- `out/bin/*` — ELF **soso** (guest; requiere SDK: `cargo xtask sal-build --cross-only` en repo `soso`).
+- `out/linux/bin/*` — binarios **Linux** nativos (`sal build --target linux`); misma fuente y `std/soso`, con shim de syscalls en el runtime Sal.
+
+Requiere `sal` en PATH (repo hermano `../sal`).
 
 ## Instalación en soso
 
@@ -21,9 +26,27 @@ soso-pkg instalar opencode-sal
 
 ## Comandos
 
-- `opencode --version`
-- `opencode run [--format json] <prompt>`
-- `opencode campana <dir>` — coordinador (diez tareas, validación en copia)
-- `opencode reinstalar` — autorecompila e reinstala el paquete (T93)
+- `opencode --version` (0.3.0)
+- `opencode run [--format json] <prompt>` — bucle con herramientas, eventos JSON tipo OpenCode (`step_start`, `tool_use`, `text`, `step_finish`), HTTP a `soso-llm` (`opencode.json` → puerto 7422/7442)
+- `soso-improve-sal campana <dir>` — coordinador (captura, diez pasos, validación)
+- `opencode reinstalar` — reinstala vía `soso-pkg` (borrador)
+
+### Eventos `--format json`
+
+Líneas JSON compatibles con el ejecutor Rust (`runner.rs`): `step_start`, `tool_use`, `text`, `step_finish`, `error`.
+
+### Prueba local (host Linux)
+
+```bash
+./tests/probar_http.sh   # build linux + soso, mock en 7422, opencode run
+python3 tests/mock_http_server.py 7422   # 1ª respuesta tool read, 2ª content
+out/linux/bin/opencode run --format json "prompt"
+```
+
+En el guest, con `soso-llm serve` y el mock o modelo real:
+
+```sh
+opencode run --format json "lee /tmp/oc-fixture.txt"
+```
 
 Pruebas HTTP usan servidor mock local; no llaman a modelos reales en CI.

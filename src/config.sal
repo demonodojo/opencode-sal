@@ -1,17 +1,24 @@
 import "../../sal/std/soso/fs.sal"
+import "skills.sal"
 
-fn config_base_url() -> String ! io, alloc
+fn config_port() -> Int ! io, alloc
     raw = read_file("opencode.json")
-    if str_contains(raw, "127.0.0.1:7422") != 0
-        "http://127.0.0.1:7422"
+    if str_contains(raw, ":7442") != 0
+        7442
     else
-        if str_contains(raw, "127.0.0.1:7442") != 0
-            "http://127.0.0.1:7442"
-        else
-            "http://127.0.0.1:7422"
+        7422
 
 fn config_model() -> String
     "soso-coder"
 
 fn agents_md() -> String ! io, alloc
-    read_file("AGENTS.md")
+    t = read_file("AGENTS.md")
+    if str_len(t) <= 0
+        "You are opencode-sal on soso."
+    else
+        t
+
+fn system_prompt() -> String ! io, alloc
+    base = agents_md()
+    sk = skills_append_default(base)
+    sk

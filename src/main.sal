@@ -3,7 +3,58 @@ import "../../sal/std/soso/io.sal"
 import "../../sal/std/soso/process.sal"
 
 fn version_str() -> String
-    "opencode-sal 0.1.0"
+    "opencode-sal 0.3.0"
+
+fn scan_flags(i: Int, n: Int, fmt: Int, cont: Int, max_turns: Int) -> Int ! alloc
+    if i >= n
+        fmt * 1000000 + cont * 10000 + max_turns
+    else
+        a = argv(i)
+        if str_eq(a, "--format") != 0
+            f2 = fmt
+            if i + 1 < n
+                if str_eq(argv(i + 1), "json") != 0
+                    f2 = 1
+            scan_flags(i + 2, n, f2, cont, max_turns)
+        else
+            if str_eq(a, "--continue") != 0
+                scan_flags(i + 1, n, fmt, 1, max_turns)
+            else
+                if str_eq(a, "--max-turns") != 0
+                    m2 = max_turns
+                    if i + 1 < n
+                        m2 = str_as_int(argv(i + 1))
+                    scan_flags(i + 2, n, fmt, cont, m2)
+                else
+                    if str_eq(a, "--session") != 0
+                        scan_flags(i + 2, n, fmt, cont, max_turns)
+                    else
+                        scan_flags(i + 1, n, fmt, cont, max_turns)
+
+fn scan_session(i: Int, n: Int) -> String ! alloc
+    if i >= n
+        "default"
+    else
+        if str_eq(argv(i), "--session") != 0
+            if i + 1 < n
+                argv(i + 1)
+            else
+                "default"
+        else
+            scan_session(i + 1, n)
+
+fn last_arg_prompt(n: Int) -> String ! alloc
+    if n < 3
+        "hello"
+    else
+        last = argv(n - 1)
+        if str_eq(last, "json") != 0
+            "hello"
+        else
+            if str_contains(last, "--") != 0
+                "hello"
+            else
+                last
 
 fn main() -> Int ! io, alloc
     if argc() < 2
@@ -16,23 +67,18 @@ fn main() -> Int ! io, alloc
             0
         else
             if str_eq(a1, "run") != 0
-                fmt = 0
-                prompt = ""
-                if argc() >= 3
-                    if str_eq(argv(2), "--format") != 0
-                        if argc() >= 5
-                            if str_eq(argv(3), "json") != 0
-                                fmt = 1
-                            prompt = argv(4)
-                    else
-                        prompt = argv(2)
-                if str_len(prompt) <= 0
-                    prompt = "hello"
-                run_once(prompt, fmt)
+                n = argc()
+                packed = scan_flags(2, n, 0, 0, 40)
+                fmt = packed / 1000000
+                cont = (packed / 10000) - fmt * 100
+                max_turns = packed - fmt * 1000000 - cont * 10000
+                sid = scan_session(2, n)
+                prompt = last_arg_prompt(n)
+                run_once(prompt, fmt, max_turns, sid, cont)
             else
                 if str_eq(a1, "reinstalar") != 0
                     _s = spawn_io_full("/bin/soso-pkg", 0, 1, 2, -1)
                     0
                 else
-                    _h = write_str_fd(2, "uso: opencode [--version|run|reinstalar]\n")
+                    _h = write_str_fd(2, "uso: opencode run [--format json] [--session ID] [--continue] [--max-turns N] PROMPT\n")
                     2

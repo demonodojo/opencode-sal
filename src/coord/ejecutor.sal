@@ -2,8 +2,7 @@ import "../../../sal/std/soso/process.sal"
 import "../../../sal/std/soso/io.sal"
 
 fn ejecutor_run(prompt: String) -> Int ! io, alloc
-    _p = prompt
-    spawn_io_full("/var/paquetes/opencode-sal/bin/opencode", 0, 1, 2, -1)
+    spawn_io_5("/bin/opencode", "run", "--format", "json", prompt, 0, 1, 2, -1)
 
 fn emit_event(kind: String) -> Int ! io, alloc
     write_str_fd(1, "event:" + kind + "\n")

@@ -8,3 +8,10 @@ fn session_save(id: String, body: String) -> Int ! io, alloc
 
 fn session_load(id: String) -> String ! io, alloc
     read_file(session_path(id))
+
+fn session_continue_prompt(id: String, prompt: String) -> String ! io, alloc
+    prev = session_load(id)
+    if str_len(prev) <= 0
+        prompt
+    else
+        "Continue prior session.\n" + prompt + "\n(context:" + str_slice(prev, 0, 512) + ")"

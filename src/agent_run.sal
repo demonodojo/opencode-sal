@@ -1,29 +1,47 @@
 import "config.sal"
 import "http.sal"
 import "json.sal"
-import "sse.sal"
+import "parse.sal"
+import "events.sal"
+import "tools.sal"
 import "session.sal"
 import "../../sal/std/soso/io.sal"
 
-fn chat_body(prompt: String, _model: String) -> String ! alloc
-    "model=soso-coder user=" + json_esc(prompt)
-
-fn run_once(prompt: String, json_out: Int) -> Int ! io, alloc
-    model = config_model()
-    body = chat_body(prompt, model)
-    resp = http_post(7422, "/v1/chat/completions", body)
-    if sse_has_data(resp) != 0
-        line = json_emit_line("text", "ok")
-        if json_out != 0
-            _w = write_str_fd(1, line)
-        _d = session_save("last", resp)
+fn run_agent_turn(prompt: String, json_out: Int, max_turns: Int, session_id: String, turn: Int, resp: String, last_user: String) -> Int ! io, alloc
+    if turn >= max_turns
         0
     else
-        if str_contains(resp, "content") != 0
-            line = json_emit_line("text", "model")
-            if json_out != 0
-                _w = write_str_fd(1, line)
-            _fin = write_str_fd(1, json_emit_done())
-            0
+        if resp_has_tool_calls(resp) != 0
+            name = resp_tool_name(resp)
+            path = resp_tool_path(resp)
+            cid = int_to_str(turn + 1)
+            _r = oc_tool_use(json_out, cid, name, 0)
+            out = tool_dispatch(name, path, resp)
+            _d = oc_tool_use(json_out, cid, name, 1)
+            port = config_port()
+            model = config_model()
+            body = followup_tool_body(model, last_user, name, out)
+            resp2 = http_post(port, "/v1/chat/completions", body)
+            run_agent_turn(prompt, json_out, max_turns, session_id, turn + 1, resp2, last_user)
         else
-            1
+            txt = resp_assistant_text(resp)
+            if str_len(txt) <= 0
+                txt = "done"
+            _t = oc_text(json_out, txt)
+            0
+
+fn run_once(prompt: String, json_out: Int, max_turns: Int, session_id: String, cont: Int) -> Int ! io, alloc
+    _s = oc_step_start(json_out)
+    user_prompt = if cont != 0
+        session_continue_prompt(session_id, prompt)
+    else
+        prompt
+    port = config_port()
+    model = config_model()
+    sys = system_prompt()
+    body = chat_completion_body(model, sys, user_prompt)
+    resp = http_post(port, "/v1/chat/completions", body)
+    _a = run_agent_turn(user_prompt, json_out, max_turns, session_id, 0, resp, user_prompt)
+    _f = oc_step_finish(json_out, 0, 0)
+    _w = session_save(session_id, resp)
+    0
