@@ -1,20 +1,110 @@
 import "io/fs.sal"
 import "skills.sal"
+import "strutil.sal"
 
-fn config_port() -> Int ! io, alloc
-    raw = read_file("opencode.json")
+fn port_legacy(raw: String) -> Int ! alloc
     if str_contains(raw, ":7442") != 0
         7442
     else
         7422
 
-fn config_model() -> String
+fn digits_at(raw: String, i: Int, acc: Int) -> Int ! alloc
+    if i >= str_len(raw)
+        acc
+    else
+        c = str_char(raw, i)
+        if c >= 48
+            if c <= 57
+                digits_at(raw, i + 1, acc * 10 + (c - 48))
+            else
+                acc
+        else
+            acc
+
+fn skip_blanks(raw: String, i: Int) -> Int ! alloc
+    if i >= str_len(raw)
+        i
+    else
+        c = str_char(raw, i)
+        if c == 32
+            skip_blanks(raw, i + 1)
+        else
+            if c == 10
+                skip_blanks(raw, i + 1)
+            else
+                i
+
+# Puerto del bloque "models": { "<modelo>": { "port": N } }; -1 si no hay.
+fn port_of_model(raw: String, model: String) -> Int ! alloc
+    q = json_quote_char()
+    m = str_index_of(raw, q + "models" + q)
+    if m < 0
+        -1
+    else
+        k = str_index_from(raw, q + model + q, m + 8)
+        if k < 0
+            -1
+        else
+            close = str_index_from(raw, json_rbrace(), k)
+            p = str_index_from(raw, q + "port" + q, k)
+            if p < 0
+                -1
+            else
+                if close >= 0
+                    if p > close
+                        -1
+                    else
+                        digits_at(raw, skip_blanks(raw, str_index_from(raw, ":", p) + 1), 0)
+                else
+                    digits_at(raw, skip_blanks(raw, str_index_from(raw, ":", p) + 1), 0)
+
+# Puerto de soso-llm para un modelo: "models" > ":7442" legado > 7422.
+fn config_port_from(raw: String, model: String) -> Int ! alloc
+    q = json_quote_char()
+    if str_contains(raw, q + "models" + q) != 0
+        p = port_of_model(raw, model)
+        if p > 0
+            p
+        else
+            7422
+    else
+        port_legacy(raw)
+
+fn config_port_for(model: String) -> Int ! io, alloc
+    config_port_from(read_file("supercoder.json"), model)
+
+fn config_port() -> Int ! io, alloc
+    config_port_from(read_file("supercoder.json"), config_model())
+
+fn config_model_default() -> String
     "soso-coder"
+
+fn config_model_json(raw: String) -> String ! alloc
+    q = json_quote_char()
+    m = extract_quoted_after(raw, q + "model" + q + ":" + q)
+    if str_len(m) > 0
+        m
+    else
+        extract_quoted_after(raw, q + "model" + q + ": " + q)
+
+# Prioridad: --model > "model" en supercoder.json > modelo por defecto.
+fn config_model_for(flag: String) -> String ! io, alloc
+    if str_len(flag) > 0
+        flag
+    else
+        m = config_model_json(read_file("supercoder.json"))
+        if str_len(m) > 0
+            m
+        else
+            config_model_default()
+
+fn config_model() -> String ! io, alloc
+    config_model_for("")
 
 fn agents_md() -> String ! io, alloc
     t = read_file("AGENTS.md")
     if str_len(t) <= 0
-        "You are opencode-sal on soso."
+        "You are supercoder-sal on soso."
     else
         t
 

@@ -2,7 +2,7 @@ import "strutil.sal"
 import "io/io.sal"
 
 fn oc_tui_log_path() -> String
-    "/tmp/opencode-sal-tui.log"
+    "/tmp/supercoder-sal-tui.log"
 
 fn oc_tui_log_reset() -> Int ! io, alloc
     write_file(oc_tui_log_path(), "")

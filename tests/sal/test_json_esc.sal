@@ -1,0 +1,21 @@
+import "../../src/strutil.sal"
+import "support/assert.sal"
+
+fn main() -> Int ! io, alloc
+    a = assert_str_eq(json_esc_content("plain"), "plain", 1)
+    if a != 0
+        a
+    else
+        b = assert_str_eq(json_esc_content("a\"b"), "a\\\"b", 2)
+        if b != 0
+            b
+        else
+            c = assert_str_eq(json_esc_content("line\n"), "line\\n", 3)
+            if c != 0
+                c
+            else
+                d = assert_str_eq(json_esc_content("back\\slash"), "back\\\\slash", 4)
+                if d != 0
+                    d
+                else
+                    0

@@ -1,21 +1,21 @@
 ---
-name: opencode-sal-dev
+name: supercoder-sal-dev
 description: >-
-  Compila, prueba y organiza opencode-sal, la reimplementación de OpenCode en
+  Compila, prueba y organiza supercoder-sal, la reimplementación de SuperCoder en
   Sal para soso (D12). Usar al tocar build.sh, Sal.toml, fuentes .sal, tests,
-  el empaquetado con soso-pkg, o al preguntar cómo construir opencode o
+  el empaquetado con soso-pkg, o al preguntar cómo construir supercoder o
   soso-improve-sal para el guest o para Linux.
 ---
 
-# opencode-sal — desarrollo
+# supercoder-sal — desarrollo
 
-Reimplementación compatible de OpenCode en Sal. Decisión D12 en el repo hermano `soso` (`docs/self-improvement/DECISIONES.md`). Dos binarios, la misma fuente, dos destinos.
+Reimplementación compatible de SuperCoder en Sal. Decisión D12 en el repo hermano `soso` (`docs/self-improvement/DECISIONES.md`). Dos binarios, la misma fuente, dos destinos.
 
 ## Layout
 
 | Ruta | Qué es |
 |------|--------|
-| `src/main.sal` | CLI `opencode` |
+| `src/main.sal` | CLI `supercoder` |
 | `src/coord_main.sal` | CLI `soso-improve-sal` |
 | `src/*.sal` | Bucle, HTTP, JSON, herramientas, sesión, skills |
 | `src/coord/*.sal` | Campaña: captura, ejecutor, validador |
@@ -25,7 +25,7 @@ Reimplementación compatible de OpenCode en Sal. Decisión D12 en el repo herman
 
 `target/` y `src/target/` son caché del compilador.
 
-El agente (`opencode run`, herramientas, eventos) está en [opencode-sal-agente](../opencode-sal-agente/SKILL.md). La campaña está en [opencode-sal-campana](../opencode-sal-campana/SKILL.md).
+El agente (`supercoder run`, herramientas, eventos) está en [supercoder-sal-agente](../supercoder-sal-agente/SKILL.md). La campaña está en [supercoder-sal-campana](../supercoder-sal-campana/SKILL.md).
 
 ## Build
 
@@ -41,8 +41,8 @@ cargo xtask sal-build --cross-only   # en ../soso, una vez
 Instalación en el guest, desde el monorepo soso:
 
 ```bash
-cargo xtask pkg-pack opencode-sal
-soso-pkg instalar opencode-sal
+cargo xtask pkg-pack supercoder-sal
+soso-pkg instalar supercoder-sal
 ```
 
 ## Pruebas
@@ -53,7 +53,7 @@ Las pruebas HTTP hablan con el mock local. No llaman a `soso-llm` ni a un modelo
 ./tests/probar_http.sh
 python3 tests/mock_http_server.py 7422          # read, luego content
 python3 tests/mock_http_server.py 7422 edit     # read, edit, content
-out/linux/bin/opencode run --format json --max-turns 1 "prompt"
+out/linux/bin/supercoder run --format json --max-turns 1 "prompt"
 ```
 
 El mock escucha en `127.0.0.1`, atiende una conexión por respuesta y cierra. Puerto por defecto `7422`. `probar_http.sh` construye, arranca el mock, imprime `--version` y las cinco primeras líneas de `run --format json`. `probar_tui.sh` prueba la sesión sin argumentos.
@@ -61,7 +61,7 @@ El mock escucha en `127.0.0.1`, atiende una conexión por respuesta y cierra. Pu
 ## CI y release
 
 - [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml): en cada PR/push a `main`, checkout de `demonodojo/sal` y `demonodojo/soso`, `scripts/release-build.sh`, `probar_http.sh` y `probar_tui.sh`.
-- Publicar versión nueva: skill [opencode-sal-release](../opencode-sal-release/SKILL.md) (tag, Release, artefactos).
+- Publicar versión nueva: skill [supercoder-sal-release](../supercoder-sal-release/SKILL.md) (tag, Release, artefactos).
 
 ## Fuentes `.sal`
 

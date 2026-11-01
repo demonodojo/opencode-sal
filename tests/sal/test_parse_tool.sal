@@ -1,0 +1,36 @@
+import "../../src/parse.sal"
+import "support/assert.sal"
+
+fn q() -> String ! alloc
+    char_to_str(34)
+
+fn tool_sample() -> String ! alloc
+    q() + "tool_calls" + q() + ":" + char_to_str(91) + char_to_str(123) + q() + "function" + q() + ":" + char_to_str(123) + q() + "name" + q() + ":" + q() + "read" + q() + "," + q() + "arguments" + q() + ":" + q() + "path" + char_to_str(34) + char_to_str(58) + char_to_str(34) + "/a" + q() + char_to_str(125) + char_to_str(125) + char_to_str(93) + char_to_str(125)
+
+fn plain_sample() -> String ! alloc
+    q() + "content" + q() + ":" + q() + "hola" + q()
+
+fn main() -> Int ! io, alloc
+    tool_body = tool_sample()
+    h = assert_ne(resp_has_tool_calls(tool_body), 0, 1)
+    if h != 0
+        h
+    else
+        n = assert_str_eq(resp_tool_name(tool_body), "read", 2)
+        if n != 0
+            n
+        else
+            path = assert_str_eq(resp_tool_path(tool_body), "/a", 3)
+            if path != 0
+                path
+            else
+                plain = plain_sample()
+                z = assert_zero(resp_has_tool_calls(plain), 4)
+                if z != 0
+                    z
+                else
+                    t = assert_str_eq(resp_assistant_text(plain), "hola", 5)
+                    if t != 0
+                        t
+                    else
+                        0

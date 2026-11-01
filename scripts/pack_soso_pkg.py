@@ -9,7 +9,7 @@ import tarfile
 from pathlib import Path
 
 ABI_DEFAULT = 1
-NOMBRE = "opencode-sal"
+NOMBRE = "supercoder-sal"
 
 
 def read_version(root: Path) -> str:
@@ -45,16 +45,16 @@ def main() -> None:
     args = ap.parse_args()
     root = args.root
     ver = read_version(root)
-    oc = (root / "out/bin/opencode").read_bytes()
+    oc = (root / "out/bin/supercoder").read_bytes()
     imp = (root / "out/bin/soso-improve-sal").read_bytes()
-    ver_line = f"opencode-sal {ver}\n".encode()
+    ver_line = f"supercoder-sal {ver}\n".encode()
     files = [
-        ("bin/opencode", oc),
+        ("bin/supercoder", oc),
         ("bin/soso-improve-sal", imp),
-        ("share/opencode/VERSION", ver_line),
+        ("share/supercoder/VERSION", ver_line),
     ]
     man_text, pack = empaquetar(ver, args.abi, files)
-    out_dir = args.out_dir or (root / "dist" / f"opencode-sal-{ver}-soso-pkg")
+    out_dir = args.out_dir or (root / "dist" / f"supercoder-sal-{ver}-soso-pkg")
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "paquete.txt").write_text(man_text, encoding="utf-8")
     (out_dir / "paquete.pack").write_bytes(pack)
@@ -62,7 +62,7 @@ def main() -> None:
         dest = out_dir / path
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(data)
-    tarball = root / "dist" / f"opencode-sal-{ver}-soso-pkg.tar.gz"
+    tarball = root / "dist" / f"supercoder-sal-{ver}-soso-pkg.tar.gz"
     tarball.parent.mkdir(parents=True, exist_ok=True)
     with tarfile.open(tarball, "w:gz") as tf:
         for p in sorted(out_dir.rglob("*")):

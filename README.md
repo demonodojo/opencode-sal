@@ -1,4 +1,4 @@
-# opencode-sal
+# supercoder-sal
 
 Reimplementación de OpenCode en Sal para soso ([D12](https://github.com/demonodojo/soso/blob/main/docs/self-improvement/DECISIONES.md)).
 
@@ -20,17 +20,17 @@ Requiere `sal` en PATH (repo hermano `../sal`).
 Desde el monorepo soso:
 
 ```bash
-cargo xtask pkg-pack opencode-sal
-soso-pkg instalar opencode-sal
+cargo xtask pkg-pack supercoder-sal
+soso-pkg instalar supercoder-sal
 ```
 
 ## Comandos
 
-- `opencode` — TUI (logo, sesión y compositor, como OpenCode); `exit`/`quit`/EOF para salir
-- `opencode --version` (0.4.1)
-- `opencode run [--format json] <prompt>` — bucle con herramientas, eventos JSON tipo OpenCode (`step_start`, `tool_use`, `text`, `step_finish`), HTTP a `soso-llm` (`opencode.json` → puerto 7422/7442)
+- `supercoder` — TUI (logo, sesión y compositor, como OpenCode); `exit`/`quit`/EOF para salir
+- `supercoder --version` (0.4.1)
+- `supercoder run [--format json] <prompt>` — bucle con herramientas, eventos JSON tipo OpenCode (`step_start`, `tool_use`, `text`, `step_finish`), HTTP a `soso-llm` (`supercoder.json` → puerto 7422/7442)
 - `soso-improve-sal campana <dir>` — coordinador (captura, diez pasos, validación)
-- `opencode reinstalar` — reinstala vía `soso-pkg` (borrador)
+- `supercoder reinstalar` — reinstala vía `soso-pkg` (borrador)
 
 ### Eventos `--format json`
 
@@ -39,18 +39,34 @@ Líneas JSON compatibles con el ejecutor Rust (`runner.rs`): `step_start`, `tool
 ### Prueba local (host Linux)
 
 ```bash
-./tests/probar_http.sh   # build linux + soso, mock en 7422, opencode run
+./tests/probar_http.sh   # build linux + soso, mock en 7422, supercoder run
 ./tests/probar_tui.sh    # sesión interactiva sin args, mock en 7422
 python3 tests/mock_http_server.py 7422   # 1ª respuesta tool read, 2ª content
-out/linux/bin/opencode run --format json "prompt"
-printf 'prompt\nexit\n' | out/linux/bin/opencode
+out/linux/bin/supercoder run --format json "prompt"
+printf 'prompt\nexit\n' | out/linux/bin/supercoder
 ```
 
 En el guest, con `soso-llm serve` y el mock o modelo real:
 
 ```sh
-opencode run --format json "lee /tmp/oc-fixture.txt"
+supercoder run --format json "lee /tmp/oc-fixture.txt"
 ```
+
+## Modelos
+
+`supercoder run --model MODELO …` (o `-m`) elige el modelo; si no se indica, se usa `"model"` de `supercoder.json` y, en su defecto, `soso-coder`. Cada modelo puede hablar con su propio `soso-llm` (puerto en loopback):
+
+```json
+{
+  "model": "soso-coder",
+  "models": {
+    "soso-coder": { "port": 7422 },
+    "otro-modelo": { "port": 7442 }
+  }
+}
+```
+
+Un modelo sin entrada en `"models"` usa 7422. Sin bloque `"models"` se mantiene el comportamiento anterior (`:7442` en el fichero selecciona 7442).
 
 Pruebas HTTP usan servidor mock local; no llaman a modelos reales en CI.
 
@@ -65,7 +81,7 @@ El workflow [`.github/workflows/release.yml`](.github/workflows/release.yml) con
 
 | Artefacto | Contenido |
 |-----------|-----------|
-| `opencode-sal-<ver>-linux-x86_64.tar.gz` | `out/linux/bin/opencode`, `soso-improve-sal`, `VERSION` |
-| `opencode-sal-<ver>-soso-pkg.tar.gz` | Paquete `soso-pkg` (`paquete.txt`, `paquete.pack`, `bin/`, `share/opencode/VERSION`) |
+| `supercoder-sal-<ver>-linux-x86_64.tar.gz` | `out/linux/bin/supercoder`, `soso-improve-sal`, `VERSION` |
+| `supercoder-sal-<ver>-soso-pkg.tar.gz` | Paquete `soso-pkg` (`paquete.txt`, `paquete.pack`, `bin/`, `share/supercoder/VERSION`) |
 
 Empaquetado local: `./scripts/release-build.sh` (requiere repos hermanos `../sal` y `../soso`).

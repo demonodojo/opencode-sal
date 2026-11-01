@@ -1,0 +1,16 @@
+{
+  "name": "read_then_stop",
+  "description": "Una llamada read y respuesta final de texto",
+  "steps": [
+    {
+      "type": "tool_calls",
+      "name": "read",
+      "arguments": { "filePath": "/tmp/oc-fixture.txt" }
+    },
+    {
+      "type": "content",
+      "text": "terminado",
+      "usage": { "prompt_tokens": 100, "completion_tokens": 5, "total_tokens": 105 }
+    }
+  ]
+}

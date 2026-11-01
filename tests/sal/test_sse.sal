@@ -1,0 +1,18 @@
+import "../../src/sse.sal"
+import "support/assert.sal"
+
+fn main() -> Int ! io, alloc
+    chunk = "event: ping\ndata: " + char_to_str(123) + char_to_str(125) + "\n\n"
+    a = assert_ne(sse_has_data(chunk), 0, 1)
+    if a != 0
+        a
+    else
+        b = assert_zero(sse_has_data(""), 2)
+        if b != 0
+            b
+        else
+            c = assert_contains(sse_stub_content(), "choices", 3)
+            if c != 0
+                c
+            else
+                0

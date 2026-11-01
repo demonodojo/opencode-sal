@@ -100,7 +100,7 @@ fn tui_hint_row(side_on: Int) -> String ! alloc
     if side_on == 0
         head
     else
-        mark = tui_green() + "• " + tui_reset() + tui_bold() + "OpenCode" + tui_reset() + "  " + tui_dim() + "0.4.1" + tui_reset()
+        mark = tui_green() + "• " + tui_reset() + tui_bold() + "SuperCoder" + tui_reset() + "  " + tui_dim() + "0.4.1" + tui_reset()
         head + tui_spaces(39) + "  " + mark
 
 fn tui_prompt_block(top: Int, side_on: Int) -> Int ! io, alloc
@@ -263,7 +263,7 @@ fn tui_loop_go(turn: Int) -> Int ! io, alloc
         cont = 0
         if turn > 0
             cont = 1
-        _r = run_once(line, 2, 40, "default", cont)
+        _r = run_once(line, 2, 40, "default", cont, "")
         tui_loop_go(turn + 1)
 
 fn tui_loop() -> Int ! io, alloc

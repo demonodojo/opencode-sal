@@ -1,23 +1,23 @@
 ---
-name: opencode-sal-release
+name: supercoder-sal-release
 description: >-
-  Publica una nueva versión de opencode-sal: subir versión en Sal.toml y
+  Publica una nueva versión de supercoder-sal: subir versión en Sal.toml y
   version_str, pruebas, tag vX.Y.Z y GitHub Release con paquetes Linux y soso.
   Usar cuando el usuario pida release, publicar versión, tag, bump de versión o
   artefactos descargables en CI.
 ---
 
-# opencode-sal — publicar versión
+# supercoder-sal — publicar versión
 
 Versión canónica del **paquete**: [`Sal.toml`](../../../Sal.toml) (`version = "X.Y.Z"`).  
-Versión impresa por el binario: [`src/main.sal`](../../../src/main.sal) → `version_str()` debe ser exactamente `opencode-sal X.Y.Z` (misma `X.Y.Z`).
+Versión impresa por el binario: [`src/main.sal`](../../../src/main.sal) → `version_str()` debe ser exactamente `supercoder-sal X.Y.Z` (misma `X.Y.Z`).
 
 El workflow [`.github/workflows/release.yml`](../../../.github/workflows/release.yml) exige que el tag **`vX.Y.Z`** coincida con `Sal.toml`. Genera:
 
 | Artefacto | Contenido |
 |-----------|-----------|
-| `opencode-sal-<ver>-linux-x86_64.tar.gz` | `out/linux/bin/*`, `VERSION` |
-| `opencode-sal-<ver>-soso-pkg.tar.gz` | `paquete.txt`, `paquete.pack`, `bin/`, `share/opencode/VERSION` |
+| `supercoder-sal-<ver>-linux-x86_64.tar.gz` | `out/linux/bin/*`, `VERSION` |
+| `supercoder-sal-<ver>-soso-pkg.tar.gz` | `paquete.txt`, `paquete.pack`, `bin/`, `share/supercoder/VERSION` |
 
 Build local de artefactos: [`scripts/release-build.sh`](../../../scripts/release-build.sh) (requiere repos hermanos `../sal` y `../soso`).
 
@@ -36,22 +36,22 @@ Si el usuario no indica número, proponer el bump adecuado al diff pendiente y c
 En el mismo commit (cuando el usuario pida commit):
 
 1. `Sal.toml` → `version = "X.Y.Z"`.
-2. `src/main.sal` → literal en `version_str()`: `"opencode-sal X.Y.Z"`.
-3. [`README.md`](../../../README.md): línea `opencode --version` si cita la versión.
-4. Skills del agente (`opencode-sal-agente`): párrafo que menciona `opencode-sal X.Y.Z` en `version_str`, si existe.
+2. `src/main.sal` → literal en `version_str()`: `"supercoder-sal X.Y.Z"`.
+3. [`README.md`](../../../README.md): línea `supercoder --version` si cita la versión.
+4. Skills del agente (`supercoder-sal-agente`): párrafo que menciona `supercoder-sal X.Y.Z` en `version_str`, si existe.
 
-No tocar `OPENCODE_SAL_VERSION` en el repo `soso` salvo que el usuario pida alinear `cargo xtask pkg-pack opencode-sal` (el CI de este repo usa [`scripts/pack_soso_pkg.py`](../../../scripts/pack_soso_pkg.py) con la versión de `Sal.toml`).
+No tocar `SUPERCODER_SAL_VERSION` en el repo `soso` salvo que el usuario pida alinear `cargo xtask pkg-pack supercoder-sal` (el CI de este repo usa [`scripts/pack_soso_pkg.py`](../../../scripts/pack_soso_pkg.py) con la versión de `Sal.toml`).
 
 ### 3. Verificar antes del tag
 
-Desde la raíz de **opencode-sal**:
+Desde la raíz de **supercoder-sal**:
 
 ```bash
 chmod +x scripts/*.sh build.sh tests/*.sh
 ./scripts/release-build.sh
 ./tests/probar_http.sh
 ./tests/probar_tui.sh
-out/linux/bin/opencode --version   # debe mostrar opencode-sal X.Y.Z
+out/linux/bin/supercoder --version   # debe mostrar supercoder-sal X.Y.Z
 ./scripts/ci-version.sh            # debe imprimir X.Y.Z
 ```
 
@@ -59,12 +59,12 @@ Si falta `../sal` o `../soso`, avisar; no inventar artefactos.
 
 ### 4. Commit (solo si lo pide el usuario)
 
-Mensaje orientado al release, p. ej. `Release opencode-sal X.Y.Z`.
+Mensaje orientado al release, p. ej. `Release supercoder-sal X.Y.Z`.
 
 ### 5. Tag y push
 
 ```bash
-git tag -a "vX.Y.Z" -m "opencode-sal X.Y.Z"
+git tag -a "vX.Y.Z" -m "supercoder-sal X.Y.Z"
 git push origin "vX.Y.Z"
 ```
 
@@ -75,11 +75,11 @@ Alternativa sin tag local: en GitHub → Actions → **release** → **Run workf
 ### 6. Comprobar la Release
 
 ```bash
-gh release view "vX.Y.Z" --repo demonodojo/opencode-sal
-gh release download "vX.Y.Z" --repo demonodojo/opencode-sal -D /tmp/oc-release
+gh release view "vX.Y.Z" --repo demonodojo/supercoder-sal
+gh release download "vX.Y.Z" --repo demonodojo/supercoder-sal -D /tmp/oc-release
 ```
 
-Confirmar que existen los dos archivos y que `tar tzf` lista `bin/opencode` en ambos paquetes.
+Confirmar que existen los dos archivos y que `tar tzf` lista `bin/supercoder` en ambos paquetes.
 
 ## Errores frecuentes
 
@@ -93,5 +93,5 @@ Confirmar que existen los dos archivos y que `tar tzf` lista `bin/opencode` en a
 
 ## Relacionado
 
-- Desarrollo diario: [opencode-sal-dev](../opencode-sal-dev/SKILL.md).
-- Agente runtime: [opencode-sal-agente](../opencode-sal-agente/SKILL.md).
+- Desarrollo diario: [supercoder-sal-dev](../supercoder-sal-dev/SKILL.md).
+- Agente runtime: [supercoder-sal-agente](../supercoder-sal-agente/SKILL.md).

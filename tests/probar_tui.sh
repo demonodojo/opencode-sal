@@ -5,7 +5,7 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 python3 "$root/tests/mock_http_server.py" 7422 &
 pid=$!
 sleep 0.3
-out=$(printf 'lee /tmp/oc-fixture.txt\nexit\n' | "$root/out/linux/bin/opencode")
+out=$(printf 'lee /tmp/oc-fixture.txt\nexit\n' | "$root/out/linux/bin/supercoder")
 kill "$pid" 2>/dev/null || true
 echo "$out" | grep -q 'tool read'
 echo "$out" | grep -q 'terminado'

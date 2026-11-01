@@ -1,0 +1,24 @@
+{
+  "name": "read_edit_stop",
+  "steps": [
+    {
+      "type": "tool_calls",
+      "name": "read",
+      "arguments": { "filePath": "/tmp/oc-fixture.txt" }
+    },
+    {
+      "type": "tool_calls",
+      "name": "edit",
+      "arguments": {
+        "filePath": "/tmp/oc-fixture.txt",
+        "oldString": "fixture",
+        "newString": "patched"
+      }
+    },
+    {
+      "type": "content",
+      "text": "terminado",
+      "usage": { "prompt_tokens": 200, "completion_tokens": 8, "total_tokens": 208 }
+    }
+  ]
+}

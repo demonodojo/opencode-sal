@@ -1,27 +1,27 @@
 ---
-name: opencode-sal-agente
+name: supercoder-sal-agente
 description: >-
-  Implementa el CLI opencode en Sal: run, sesiones, prompt de sistema, bucle
+  Implementa el CLI supercoder en Sal: run, sesiones, prompt de sistema, bucle
   de herramientas, cliente HTTP a soso-llm y eventos JSON (step_start,
   tool_use, text, step_finish). Usar al editar src/main.sal, agent_run, tools,
   parse, events, http, json, config, session o skills, o al alinear la salida
   con el ejecutor Rust runner.rs.
 ---
 
-# Agente `opencode`
+# Agente `supercoder`
 
-Binario `out/linux/bin/opencode` en el host y `out/bin/opencode` en el guest. Versión impresa: `opencode-sal 0.4.1` (`version_str` en `src/main.sal`). `Sal.toml` lleva la misma versión de paquete (`0.4.1`).
+Binario `out/linux/bin/supercoder` en el host y `out/bin/supercoder` en el guest. Versión impresa: `supercoder-sal 0.4.1` (`version_str` en `src/main.sal`). `Sal.toml` lleva la misma versión de paquete (`0.4.1`).
 
 ## CLI
 
 ```
-opencode
-opencode --version
-opencode run [--format json] [--session ID] [--continue] [--max-turns N] PROMPT
-opencode reinstalar
+supercoder
+supercoder --version
+supercoder run [--format json] [--session ID] [--continue] [--max-turns N] PROMPT
+supercoder reinstalar
 ```
 
-Sin argumentos entra en el TUI (`tui_loop` en `src/tui.sal`), pantalla alternativa ANSI. Antes del primer mensaje: logo OPEN CODE centrado y compositor (barra izquierda, agente `Build`, modelo `soso-coder`). Después: sesión con el mensaje del usuario, la línea `tool <nombre>`, el texto del asistente y una columna con el título `default` y `OpenCode 0.4.1`. `json_out == 2` no escribe esas líneas en bruto: las acumula en `/tmp/opencode-sal-tui.log` y el TUI las pinta. Tras el primer mensaje, los turnos siguientes usan `--continue` vía `session_continue_prompt`. `exit`, `quit`, `/exit`, `/quit` o EOF (Ctrl-D) salen 0; línea vacía repinta. Otro subcomando desconocido sale 2 con el uso en stderr.
+Sin argumentos entra en el TUI (`tui_loop` en `src/tui.sal`), pantalla alternativa ANSI. Antes del primer mensaje: logo OPEN CODE centrado y compositor (barra izquierda, agente `Build`, modelo `soso-coder`). Después: sesión con el mensaje del usuario, la línea `tool <nombre>`, el texto del asistente y una columna con el título `default` y `SuperCoder 0.4.1`. `json_out == 2` no escribe esas líneas en bruto: las acumula en `/tmp/supercoder-sal-tui.log` y el TUI las pinta. Tras el primer mensaje, los turnos siguientes usan `--continue` vía `session_continue_prompt`. `exit`, `quit`, `/exit`, `/quit` o EOF (Ctrl-D) salen 0; línea vacía repinta. Otro subcomando desconocido sale 2 con el uso en stderr.
 
 `run` empaqueta flags en un entero (`scan_flags`): formato, `--continue` y `--max-turns` (default 40). `--session` por defecto es `default`. El prompt es el último argumento; si es `json` o contiene `--`, el prompt queda `hello`. Con menos de 3 argumentos el prompt también es `hello`.
 
@@ -33,7 +33,7 @@ Sin argumentos entra en el TUI (`tui_loop` en `src/tui.sal`), pantalla alternati
 
 1. `step_start` si la salida es JSON.
 2. Prompt de usuario, o `session_continue_prompt` si `--continue`.
-3. `POST /v1/chat/completions` al puerto de `opencode.json`, cuerpo de `chat_completion_body`.
+3. `POST /v1/chat/completions` al puerto de `supercoder.json`, cuerpo de `chat_completion_body`.
 4. Mientras la respuesta contenga `tool_calls` o `function`, y el turno sea menor que `--max-turns`: despacha la herramienta, emite `tool_use` running y completed, y reenvía con `followup_tool_body`.
 5. Si no hay herramienta: emite `text` (o `done` si el contenido sale vacío), `step_finish` con tokens 0/0, y guarda el cuerpo HTTP en la sesión.
 
@@ -43,10 +43,10 @@ Sin argumentos entra en el TUI (`tui_loop` en `src/tui.sal`), pantalla alternati
 
 | Dato | Origen |
 |------|--------|
-| Puerto | `7442` si `opencode.json` contiene el texto `:7442`; si no, `7422` |
+| Puerto | `7442` si `supercoder.json` contiene el texto `:7442`; si no, `7422` |
 | Modelo | fijo `soso-coder` |
-| Sistema | `AGENTS.md`, o `You are opencode-sal on soso.` si el fichero está vacío |
-| Skill | se concatena `.opencode/skills/soso-self-improvement/SKILL.md`, o si no `.claude/skills/soso-self-improvement/SKILL.md`, bajo el separador `--- skill ---` |
+| Sistema | `AGENTS.md`, o `You are supercoder-sal on soso.` si el fichero está vacío |
+| Skill | se concatena `.supercoder/skills/soso-self-improvement/SKILL.md`, o si no `.claude/skills/soso-self-improvement/SKILL.md`, bajo el separador `--- skill ---` |
 
 HTTP/1.1 a `127.0.0.1`, sin TLS, `stream: false`, `Connection: close`, cuerpo máximo de lectura 65536. `http_post` devuelve `""` si no conecta. El seguimiento de una herramienta es otro mensaje `user` con el texto `Tool <nombre> returned: <salida>`.
 
@@ -70,4 +70,4 @@ El nombre se elige por subcadenas, en este orden: `reemplazar_texto`, `edit`, `g
 
 ## Sesión
 
-`/var/opencode/sessions/<id>/state.json`. `--continue` antepone `Continue prior session.` y hasta 512 caracteres del estado previo. `session_save` guarda la última respuesta HTTP, no un historial de mensajes.
+`/var/supercoder/sessions/<id>/state.json`. `--continue` antepone `Continue prior session.` y hasta 512 caracteres del estado previo. `session_save` guarda la última respuesta HTTP, no un historial de mensajes.

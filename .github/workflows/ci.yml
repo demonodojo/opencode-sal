@@ -11,7 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          path: opencode-sal
+          path: supercoder-sal
 
       - uses: actions/checkout@v4
         with:
@@ -31,7 +31,7 @@ jobs:
         run: SOSO_SAL_SOURCE="${{ github.workspace }}/sal" python3 soso/scripts/sal-source.py --update
 
       - name: Build y pruebas
-        working-directory: opencode-sal
+        working-directory: supercoder-sal
         env:
           SAL_ROOT: ${{ github.workspace }}/sal
           SOSO_ROOT: ${{ github.workspace }}/soso

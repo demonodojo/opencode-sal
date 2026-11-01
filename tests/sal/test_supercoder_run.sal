@@ -1,0 +1,23 @@
+import "../../src/parse.sal"
+import "io/fs.sal"
+import "support/assert.sal"
+
+fn main() -> Int ! io, alloc
+    path = "/tmp/supercoder-sal-test-run.jsonl"
+    raw = read_file(path)
+    if str_len(raw) <= 0
+        assert_fail(1)
+    else
+        a = assert_contains(raw, "step_start", 2)
+        if a != 0
+            a
+        else
+            b = assert_contains(raw, "tool_use", 3)
+            if b != 0
+                b
+            else
+                c = assert_contains(raw, "step_finish", 4)
+                if c != 0
+                    c
+                else
+                    0

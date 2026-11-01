@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          path: opencode-sal
+          path: supercoder-sal
 
       - uses: actions/checkout@v4
         with:
@@ -36,7 +36,7 @@ jobs:
 
       - name: Comprobar tag vs Sal.toml
         id: meta
-        working-directory: opencode-sal
+        working-directory: supercoder-sal
         run: |
           chmod +x scripts/ci-version.sh
           VER=$(./scripts/ci-version.sh)
@@ -55,7 +55,7 @@ jobs:
           fi
 
       - name: Build artefactos
-        working-directory: opencode-sal
+        working-directory: supercoder-sal
         env:
           SAL_ROOT: ${{ github.workspace }}/sal
           SOSO_ROOT: ${{ github.workspace }}/soso
@@ -68,10 +68,10 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.meta.outputs.tag_name }}
-          name: opencode-sal ${{ steps.meta.outputs.version }}
+          name: supercoder-sal ${{ steps.meta.outputs.version }}
           generate_release_notes: true
           files: |
-            opencode-sal/dist/opencode-sal-${{ steps.meta.outputs.version }}-linux-x86_64.tar.gz
-            opencode-sal/dist/opencode-sal-${{ steps.meta.outputs.version }}-soso-pkg.tar.gz
+            supercoder-sal/dist/supercoder-sal-${{ steps.meta.outputs.version }}-linux-x86_64.tar.gz
+            supercoder-sal/dist/supercoder-sal-${{ steps.meta.outputs.version }}-soso-pkg.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

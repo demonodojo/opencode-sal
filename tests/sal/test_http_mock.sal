@@ -1,0 +1,24 @@
+import "../../src/http.sal"
+import "../../src/json.sal"
+import "../../src/config.sal"
+import "support/assert.sal"
+
+fn mock_port() -> Int
+    7422
+
+fn main() -> Int ! io, alloc
+    port = mock_port()
+    model = config_model()
+    sys = "test system"
+    user = "ping"
+    body = chat_completion_body(model, sys, user)
+    resp = http_post(port, "/v1/chat/completions", body)
+    a = assert_ne(str_len(resp), 0, 1)
+    if a != 0
+        a
+    else
+        b = assert_contains(resp, "choices", 2)
+        if b != 0
+            b
+        else
+            0
