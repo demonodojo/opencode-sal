@@ -5,6 +5,7 @@ import "parse.sal"
 import "events.sal"
 import "tools.sal"
 import "session.sal"
+import "claude.sal"
 import "io/io.sal"
 
 fn run_agent_turn(prompt: String, json_out: Int, max_turns: Int, session_id: String, turn: Int, resp: String, last_user: String, model: String) -> Int ! io, alloc
@@ -36,6 +37,22 @@ fn run_once(prompt: String, json_out: Int, max_turns: Int, session_id: String, c
     else
         prompt
     model = config_model_for(model_flag)
+    raw = read_file("supercoder.json")
+    if config_is_claude(raw, model) != 0
+        run_claude(user_prompt, json_out, session_id, model)
+    else
+        run_http(user_prompt, json_out, max_turns, session_id, model)
+
+fn run_claude(user_prompt: String, json_out: Int, session_id: String, model: String) -> Int ! io, alloc
+    txt = claude_run(model, user_prompt)
+    if str_len(txt) <= 0
+        txt = "claude -p no devolvió respuesta"
+    _t = oc_text(json_out, txt)
+    _f = oc_step_finish(json_out, 0, 0)
+    _w = session_save(session_id, txt)
+    0
+
+fn run_http(user_prompt: String, json_out: Int, max_turns: Int, session_id: String, model: String) -> Int ! io, alloc
     port = config_port_for(model)
     sys = system_prompt()
     body = chat_completion_body(model, sys, user_prompt)

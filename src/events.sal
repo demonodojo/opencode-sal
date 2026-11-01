@@ -65,10 +65,10 @@ fn oc_text(json_out: Int, text: String) -> Int ! io, alloc
         q = json_quote_char()
         lb = json_lbrace()
         rb = json_rbrace()
-        line = lb + q + "type" + q + ":" + q + "text" + q + "," + q + "part" + q + ":" + lb + q + "text" + q + ":" + q + text + q + rb + rb + "\n"
+        line = lb + q + "type" + q + ":" + q + "text" + q + "," + q + "part" + q + ":" + lb + q + "text" + q + ":" + q + json_esc_content(text) + q + rb + rb + "\n"
         oc_emit_json(line, json_out)
     else
-        0
+        write_str_fd(1, text + "\n")
 
 fn oc_error(json_out: Int, msg: String) -> Int ! io, alloc
     if json_out == 2

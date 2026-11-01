@@ -1,0 +1,74 @@
+import "io/io.sal"
+import "io/process.sal"
+import "io/pipe.sal"
+
+fn claude_prefix() -> String
+    "claude:"
+
+fn claude_has_prefix(model: String) -> Int ! alloc
+    n = str_len(claude_prefix())
+    if str_len(model) < n
+        0
+    else
+        str_eq(str_slice(model, 0, n), claude_prefix())
+
+# "claude:sonnet" -> "sonnet"; un modelo sin prefijo se pasa tal cual.
+fn claude_model_arg(model: String) -> String ! alloc
+    if claude_has_prefix(model) != 0
+        str_slice(model, str_len(claude_prefix()), str_len(model))
+    else
+        model
+
+fn claude_argv_tab(model: String, prompt: String) -> Bytes ! alloc
+    if str_len(model) > 0
+        tab = bytes_new(96)
+        _0 = spawn_argv_slot_ptr(tab, 0, spawn_string_buf("claude"), 6)
+        _1 = spawn_argv_slot_ptr(tab, 1, spawn_string_buf("-p"), 2)
+        _2 = spawn_argv_slot_ptr(tab, 2, spawn_string_buf("--model"), 7)
+        _3 = spawn_argv_slot_ptr(tab, 3, spawn_string_buf(model), str_len(model))
+        _4 = spawn_argv_slot_ptr(tab, 4, spawn_string_buf("--"), 2)
+        _5 = spawn_argv_slot_ptr(tab, 5, spawn_string_buf(prompt), str_len(prompt))
+        tab
+    else
+        tab = bytes_new(64)
+        _0 = spawn_argv_slot_ptr(tab, 0, spawn_string_buf("claude"), 6)
+        _1 = spawn_argv_slot_ptr(tab, 1, spawn_string_buf("-p"), 2)
+        _2 = spawn_argv_slot_ptr(tab, 2, spawn_string_buf("--"), 2)
+        _3 = spawn_argv_slot_ptr(tab, 3, spawn_string_buf(prompt), str_len(prompt))
+        tab
+
+fn claude_argc(model: String) -> Int
+    if str_len(model) > 0
+        6
+    else
+        4
+
+fn claude_trim_end(s: String) -> String ! alloc
+    n = str_len(s)
+    if n > 0
+        if str_char(s, n - 1) == 10
+            claude_trim_end(str_slice(s, 0, n - 1))
+        else
+            s
+    else
+        s
+
+# Ejecuta `claude -p` y devuelve su stdout; "" si no pudo lanzarse.
+fn claude_run(model: String, prompt: String) -> String ! io, alloc
+    pp = pipe_create()
+    if pp < 0
+        ""
+    else
+        rd = pipe_read_fd(pp)
+        wr = pipe_write_fd(pp)
+        m = claude_model_arg(model)
+        pid = spawn_io_argv("claude", claude_argc(m), claude_argv_tab(m, prompt), spawn_fd_closed(), wr, 2, "", 0)
+        _cw = close_fd(wr)
+        if pid < 0
+            _cr = close_fd(rd)
+            ""
+        else
+            out = read_fd_all(rd, 4194304)
+            _st = wait_pid(pid)
+            _cr = close_fd(rd)
+            claude_trim_end(out)

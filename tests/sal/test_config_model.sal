@@ -1,5 +1,6 @@
 import "../../src/config.sal"
 import "../../src/strutil.sal"
+import "../../src/claude.sal"
 import "support/assert.sal"
 
 fn main() -> Int ! io, alloc
@@ -40,4 +41,20 @@ fn main() -> Int ! io, alloc
                                     h
                                 else
                                     i = assert_zero(config_port_from(json_lbrace() + q + "x" + q + ":" + q + ":7442" + q + json_rbrace(), "a") - 7442, 9)
-                                    i
+                                    if i != 0
+                                        i
+                                    else
+                                        pc = json_lbrace() + q + "models" + q + ":" + json_lbrace() + q + "m" + q + ":" + json_lbrace() + q + "provider" + q + ": " + q + "claude" + q + json_rbrace() + "," + q + "n" + q + ":" + json_lbrace() + q + "port" + q + ":7500" + json_rbrace() + json_rbrace() + json_rbrace()
+                                        j = assert_zero(config_is_claude(pc, "m") - 1, 10)
+                                        if j != 0
+                                            j
+                                        else
+                                            k = assert_zero(config_is_claude(pc, "n"), 11)
+                                            if k != 0
+                                                k
+                                            else
+                                                l = assert_zero(config_is_claude("", "claude:sonnet") - 1, 12)
+                                                if l != 0
+                                                    l
+                                                else
+                                                    assert_str_eq(claude_model_arg("claude:sonnet"), "sonnet", 13)

@@ -83,6 +83,21 @@ PY
   stop_mock
   grep -q tool_use "$cfgdir/salida.jsonl" || { echo "FALLO: models/port no enrutó al puerto 7433" >&2; exit 1; }
   echo "OK models/port"
+
+  # backend `claude -p`: claude falso en PATH, comprueba argumentos y JSON escapado
+  fakebin="$root/tests/out/fakebin"
+  mkdir -p "$fakebin"
+  printf '#!/bin/sh\necho "args: $*"\necho "segunda \\"linea\\""\n' > "$fakebin/claude"
+  chmod +x "$fakebin/claude"
+  salida=$(cd "$cfgdir" && rm -f supercoder.json && PATH="$fakebin:$PATH" "$root/out/linux/bin/supercoder" run --format json --model claude:sonnet "di hola")
+  python3 - "$salida" <<'PY' || { echo "FALLO: backend claude -p" >&2; exit 1; }
+import json, sys
+ev = [json.loads(l) for l in sys.argv[1].splitlines()]
+txt = [e for e in ev if e["type"] == "text"][0]["part"]["text"]
+assert txt == 'args: -p --model sonnet -- di hola\nsegunda "linea"', txt
+assert ev[0]["type"] == "step_start" and ev[-1]["type"] == "step_finish"
+PY
+  echo "OK claude -p"
 fi
 
 echo "probar_sal: ${#unit_tests[@]} unitarios OK"

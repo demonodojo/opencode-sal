@@ -1,6 +1,7 @@
 import "io/fs.sal"
 import "skills.sal"
 import "strutil.sal"
+import "claude.sal"
 
 fn port_legacy(raw: String) -> Int ! alloc
     if str_contains(raw, ":7442") != 0
@@ -57,6 +58,45 @@ fn port_of_model(raw: String, model: String) -> Int ! alloc
                         digits_at(raw, skip_blanks(raw, str_index_from(raw, ":", p) + 1), 0)
                 else
                     digits_at(raw, skip_blanks(raw, str_index_from(raw, ":", p) + 1), 0)
+
+# "provider" del modelo en "models" ("" si no hay).
+fn provider_of_model(raw: String, model: String) -> String ! alloc
+    q = json_quote_char()
+    m = str_index_of(raw, q + "models" + q)
+    if m < 0
+        ""
+    else
+        k = str_index_from(raw, q + model + q, m + 8)
+        if k < 0
+            ""
+        else
+            close = str_index_from(raw, json_rbrace(), k)
+            p = str_index_from(raw, q + "provider" + q, k)
+            if p < 0
+                ""
+            else
+                if close >= 0
+                    if p > close
+                        ""
+                    else
+                        provider_value(str_slice(raw, p, str_len(raw)))
+                else
+                    provider_value(str_slice(raw, p, str_len(raw)))
+
+fn provider_value(tail: String) -> String ! alloc
+    q = json_quote_char()
+    v = extract_quoted_after(tail, q + "provider" + q + ":" + q)
+    if str_len(v) > 0
+        v
+    else
+        extract_quoted_after(tail, q + "provider" + q + ": " + q)
+
+# Un modelo usa el backend `claude -p` con prefijo "claude:" o "provider":"claude".
+fn config_is_claude(raw: String, model: String) -> Int ! alloc
+    if claude_has_prefix(model) != 0
+        1
+    else
+        str_eq(provider_of_model(raw, model), "claude")
 
 # Puerto de soso-llm para un modelo: "models" > ":7442" legado > 7422.
 fn config_port_from(raw: String, model: String) -> Int ! alloc

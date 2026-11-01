@@ -68,6 +68,15 @@ supercoder run --format json "lee /tmp/oc-fixture.txt"
 
 Un modelo sin entrada en `"models"` usa 7422. Sin bloque `"models"` se mantiene el comportamiento anterior (`:7442` en el fichero selecciona 7442).
 
+### Modelos de Anthropic (`claude -p`)
+
+Un modelo puede ejecutarse con la CLI `claude` (Claude Code) en modo no interactivo, sin `soso-llm`:
+
+- `supercoder run --model claude:sonnet "prompt"` (alias o id: `claude:haiku`, `claude:claude-opus-5-5`…), o
+- en `supercoder.json`: `"models": { "mi-claude": { "provider": "claude" } }` y `--model mi-claude`.
+
+Se lanza `claude -p --model <modelo> -- <prompt>` (se busca `claude` en el `PATH`) y su respuesta se emite como `text`. En este modo el bucle de herramientas, el prompt de sistema y los permisos los gestiona Claude Code, no supercoder; los tokens no se contabilizan (`0`).
+
 Pruebas HTTP usan servidor mock local; no llaman a modelos reales en CI.
 
 ## Release (CI)
