@@ -88,6 +88,10 @@ npm run package           # genera supercoder-<ver>.vsix
 code --install-extension supercoder-*.vsix
 ```
 
+También se registra como participante del Chat nativo de VS Code: `@supercoder <mensaje>` y `@supercoder /model <nombre>` (o sin argumento para el selector). Comparte modelo con el panel.
+
+El binario se toma de `supercoder.binaryPath`; si está vacío, de `out/linux/bin/supercoder` del workspace (donde compila `build.sh`) y, si no existe, de `supercoder` en el `PATH`.
+
 Ajustes: `supercoder.binaryPath`, `supercoder.model`, `supercoder.models` (extra del selector; los de `models` en `supercoder.json` se añaden solos), `supercoder.maxTurns`, `supercoder.historyTurns`. Comandos: abrir chat, nuevo chat, elegir modelo, enviar selección (también en el menú contextual del editor) y detener. El historial se reenvía como contexto en cada mensaje.
 
 Pruebas HTTP usan servidor mock local; no llaman a modelos reales en CI.

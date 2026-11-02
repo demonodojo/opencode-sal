@@ -1,18 +1,18 @@
-import * as fs from 'fs';
-import * as path from 'path';
 import * as vscode from 'vscode';
-import { SuperEvent, Turn, buildPrompt, modelChoices } from './events';
+import { SuperEvent, Turn, buildPrompt } from './events';
 import { Run, startRun } from './runner';
+import { State, cfg } from './state';
 
 export class ChatView implements vscode.WebviewViewProvider {
   static readonly viewType = 'supercoder.chat';
   private view?: vscode.WebviewView;
   private run?: Run;
   private history: Turn[] = [];
-  private model: string;
-
-  constructor(private readonly ctx: vscode.ExtensionContext) {
-    this.model = cfg().get<string>('model', '');
+  constructor(
+    private readonly ctx: vscode.ExtensionContext,
+    private readonly state: State,
+  ) {
+    ctx.subscriptions.push(state.onDidChangeModel((m) => this.post({ type: 'model', model: m })));
   }
 
   resolveWebviewView(view: vscode.WebviewView): void {
@@ -27,7 +27,7 @@ export class ChatView implements vscode.WebviewViewProvider {
       this.stop();
       this.view = undefined;
     });
-    this.post({ type: 'model', model: this.model });
+    this.post({ type: 'model', model: this.state.model });
   }
 
   focus(): Thenable<void> {
@@ -50,18 +50,8 @@ export class ChatView implements vscode.WebviewViewProvider {
     this.post({ type: 'insert', text });
   }
 
-  async pickModel(): Promise<void> {
-    const items = modelChoices(this.readProjectConfig(), cfg().get<string[]>('models', []));
-    const pick = await vscode.window.showQuickPick(
-      [{ label: '(por defecto)', description: 'supercoder.json o soso-coder', model: '' }].concat(
-        items.map((m) => ({ label: m, description: '', model: m })),
-      ),
-      { placeHolder: `Modelo actual: ${this.model || 'por defecto'}` },
-    );
-    if (pick) {
-      this.model = pick.model;
-      this.post({ type: 'model', model: this.model });
-    }
+  pickModel(): Promise<void> {
+    return this.state.pickModel();
   }
 
   private onMessage(m: { type: string; text?: string }): void {
@@ -80,17 +70,16 @@ export class ChatView implements vscode.WebviewViewProvider {
     if (this.run) {
       return;
     }
-    const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
     const c = cfg();
     const prompt = buildPrompt(this.history, text, c.get<number>('historyTurns', 6));
     let answer = '';
     this.post({ type: 'user', text });
     this.post({ type: 'busy', busy: true });
     this.run = startRun({
-      binary: c.get<string>('binaryPath', 'supercoder'),
-      cwd: folder,
+      binary: this.state.binary(),
+      cwd: this.state.folder(),
       prompt,
-      model: this.model || c.get<string>('model', ''),
+      model: this.state.model,
       maxTurns: c.get<number>('maxTurns', 40),
       onEvent: (e: SuperEvent) => {
         if (e.kind === 'text') {
@@ -109,18 +98,6 @@ export class ChatView implements vscode.WebviewViewProvider {
         this.post({ type: 'busy', busy: false });
       },
     });
-  }
-
-  private readProjectConfig(): string | undefined {
-    const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    if (!folder) {
-      return undefined;
-    }
-    try {
-      return fs.readFileSync(path.join(folder, 'supercoder.json'), 'utf8');
-    } catch {
-      return undefined;
-    }
   }
 
   private post(msg: unknown): void {
@@ -144,8 +121,4 @@ export class ChatView implements vscode.WebviewViewProvider {
 <script nonce="${nonce}" src="${uri('main.js')}"></script>
 </body></html>`;
   }
-}
-
-function cfg(): vscode.WorkspaceConfiguration {
-  return vscode.workspace.getConfiguration('supercoder');
 }

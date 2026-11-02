@@ -1,15 +1,19 @@
 import * as vscode from 'vscode';
 import { ChatView } from './chatView';
+import { registerParticipant } from './participant';
+import { State } from './state';
 
 export function activate(ctx: vscode.ExtensionContext): void {
-  const chat = new ChatView(ctx);
+  const state = new State();
+  const chat = new ChatView(ctx, state);
+  registerParticipant(ctx, state);
   ctx.subscriptions.push(
     vscode.window.registerWebviewViewProvider(ChatView.viewType, chat, {
       webviewOptions: { retainContextWhenHidden: true },
     }),
     vscode.commands.registerCommand('supercoder.openChat', () => chat.focus()),
     vscode.commands.registerCommand('supercoder.newChat', () => chat.newChat()),
-    vscode.commands.registerCommand('supercoder.selectModel', () => chat.pickModel()),
+    vscode.commands.registerCommand('supercoder.selectModel', () => state.pickModel()),
     vscode.commands.registerCommand('supercoder.stop', () => chat.stop()),
     vscode.commands.registerCommand('supercoder.sendSelection', async () => {
       const ed = vscode.window.activeTextEditor;

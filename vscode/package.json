@@ -5,31 +5,63 @@
   "version": "0.4.1",
   "publisher": "demonodojo",
   "license": "UNLICENSED",
-  "engines": { "vscode": "^1.90.0" },
-  "categories": ["AI", "Chat"],
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "AI",
+    "Chat"
+  ],
   "main": "./out/src/extension.js",
   "activationEvents": [],
   "contributes": {
     "viewsContainers": {
       "activitybar": [
-        { "id": "supercoder", "title": "SuperCoder", "icon": "media/icon.svg" }
+        {
+          "id": "supercoder",
+          "title": "SuperCoder",
+          "icon": "media/icon.svg"
+        }
       ]
     },
     "views": {
       "supercoder": [
-        { "type": "webview", "id": "supercoder.chat", "name": "Chat" }
+        {
+          "type": "webview",
+          "id": "supercoder.chat",
+          "name": "Chat"
+        }
       ]
     },
     "commands": [
-      { "command": "supercoder.openChat", "title": "SuperCoder: Abrir chat" },
-      { "command": "supercoder.newChat", "title": "SuperCoder: Nuevo chat" },
-      { "command": "supercoder.selectModel", "title": "SuperCoder: Elegir modelo" },
-      { "command": "supercoder.sendSelection", "title": "SuperCoder: Enviar selección al chat" },
-      { "command": "supercoder.stop", "title": "SuperCoder: Detener" }
+      {
+        "command": "supercoder.openChat",
+        "title": "SuperCoder: Abrir chat"
+      },
+      {
+        "command": "supercoder.newChat",
+        "title": "SuperCoder: Nuevo chat"
+      },
+      {
+        "command": "supercoder.selectModel",
+        "title": "SuperCoder: Elegir modelo"
+      },
+      {
+        "command": "supercoder.sendSelection",
+        "title": "SuperCoder: Enviar selección al chat"
+      },
+      {
+        "command": "supercoder.stop",
+        "title": "SuperCoder: Detener"
+      }
     ],
     "menus": {
       "editor/context": [
-        { "command": "supercoder.sendSelection", "when": "editorHasSelection", "group": "navigation@9" }
+        {
+          "command": "supercoder.sendSelection",
+          "when": "editorHasSelection",
+          "group": "navigation@9"
+        }
       ]
     },
     "configuration": {
@@ -37,8 +69,8 @@
       "properties": {
         "supercoder.binaryPath": {
           "type": "string",
-          "default": "supercoder",
-          "description": "Ruta del binario supercoder (se busca en el PATH si no es absoluta)."
+          "default": "",
+          "description": "Ruta del binario supercoder. Vacío: out/linux/bin/supercoder del workspace si existe; si no, 'supercoder' del PATH."
         },
         "supercoder.model": {
           "type": "string",
@@ -47,8 +79,14 @@
         },
         "supercoder.models": {
           "type": "array",
-          "items": { "type": "string" },
-          "default": ["claude:sonnet", "claude:opus", "claude:haiku"],
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "claude:sonnet",
+            "claude:opus",
+            "claude:haiku"
+          ],
           "description": "Modelos adicionales ofrecidos en el selector (además de los de 'models' en supercoder.json)."
         },
         "supercoder.maxTurns": {
@@ -62,7 +100,22 @@
           "description": "Intercambios previos que se reenvían como contexto en cada mensaje."
         }
       }
-    }
+    },
+    "chatParticipants": [
+      {
+        "id": "supercoder.agent",
+        "name": "supercoder",
+        "fullName": "SuperCoder",
+        "description": "Agente de código supercoder-sal (soso-llm o claude -p)",
+        "isSticky": true,
+        "commands": [
+          {
+            "name": "model",
+            "description": "Elegir modelo (/model <nombre>, /model default, o sin argumento para el selector)"
+          }
+        ]
+      }
+    ]
   },
   "scripts": {
     "compile": "tsc -p .",
