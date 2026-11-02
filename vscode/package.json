@@ -1,0 +1,79 @@
+{
+  "name": "supercoder",
+  "displayName": "SuperCoder",
+  "description": "Chat con supercoder (supercoder-sal) dentro de VS Code, con selección de modelo (soso-llm o claude -p).",
+  "version": "0.4.1",
+  "publisher": "demonodojo",
+  "license": "UNLICENSED",
+  "engines": { "vscode": "^1.90.0" },
+  "categories": ["AI", "Chat"],
+  "main": "./out/src/extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        { "id": "supercoder", "title": "SuperCoder", "icon": "media/icon.svg" }
+      ]
+    },
+    "views": {
+      "supercoder": [
+        { "type": "webview", "id": "supercoder.chat", "name": "Chat" }
+      ]
+    },
+    "commands": [
+      { "command": "supercoder.openChat", "title": "SuperCoder: Abrir chat" },
+      { "command": "supercoder.newChat", "title": "SuperCoder: Nuevo chat" },
+      { "command": "supercoder.selectModel", "title": "SuperCoder: Elegir modelo" },
+      { "command": "supercoder.sendSelection", "title": "SuperCoder: Enviar selección al chat" },
+      { "command": "supercoder.stop", "title": "SuperCoder: Detener" }
+    ],
+    "menus": {
+      "editor/context": [
+        { "command": "supercoder.sendSelection", "when": "editorHasSelection", "group": "navigation@9" }
+      ]
+    },
+    "configuration": {
+      "title": "SuperCoder",
+      "properties": {
+        "supercoder.binaryPath": {
+          "type": "string",
+          "default": "supercoder",
+          "description": "Ruta del binario supercoder (se busca en el PATH si no es absoluta)."
+        },
+        "supercoder.model": {
+          "type": "string",
+          "default": "",
+          "description": "Modelo por defecto (--model). Vacío: el de supercoder.json o soso-coder. Usa 'claude:<alias>' para claude -p."
+        },
+        "supercoder.models": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["claude:sonnet", "claude:opus", "claude:haiku"],
+          "description": "Modelos adicionales ofrecidos en el selector (además de los de 'models' en supercoder.json)."
+        },
+        "supercoder.maxTurns": {
+          "type": "number",
+          "default": 40,
+          "description": "Máximo de vueltas del bucle de herramientas (--max-turns)."
+        },
+        "supercoder.historyTurns": {
+          "type": "number",
+          "default": 6,
+          "description": "Intercambios previos que se reenvían como contexto en cada mensaje."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -watch -p .",
+    "test": "npm run compile && node --test out/test/*.test.js",
+    "package": "npm run compile && vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "^3.0.0",
+    "typescript": "^5.5.0"
+  }
+}

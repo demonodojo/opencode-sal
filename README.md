@@ -77,6 +77,19 @@ Un modelo puede ejecutarse con la CLI `claude` (Claude Code) en modo no interact
 
 Se lanza `claude -p --model <modelo> -- <prompt>` (se busca `claude` en el `PATH`) y su respuesta se emite como `text`. En este modo el bucle de herramientas, el prompt de sistema y los permisos los gestiona Claude Code, no supercoder; los tokens no se contabilizan (`0`).
 
+## Extensión de VS Code
+
+`vscode/` contiene una extensión con un panel de chat (barra de actividad → SuperCoder) que lanza `supercoder run --format json` en la carpeta del workspace y pinta los eventos (herramientas, texto, tokens).
+
+```bash
+cd vscode && npm install
+npm test                  # parser de eventos y runner (usa out/linux/bin/supercoder si existe)
+npm run package           # genera supercoder-<ver>.vsix
+code --install-extension supercoder-*.vsix
+```
+
+Ajustes: `supercoder.binaryPath`, `supercoder.model`, `supercoder.models` (extra del selector; los de `models` en `supercoder.json` se añaden solos), `supercoder.maxTurns`, `supercoder.historyTurns`. Comandos: abrir chat, nuevo chat, elegir modelo, enviar selección (también en el menú contextual del editor) y detener. El historial se reenvía como contexto en cada mensaje.
+
 Pruebas HTTP usan servidor mock local; no llaman a modelos reales en CI.
 
 ## Release (CI)
