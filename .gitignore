@@ -2,3 +2,4 @@ out/
 target/
 dist/
 /sal_modules
+tests/work/
