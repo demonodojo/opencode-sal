@@ -1,0 +1,118 @@
+# Bucle del agente: modelo -> llamadas a herramientas -> resultados -> modelo ...
+
+import "io/time.sal"
+import "salkit/json.sal"
+import "salkit/strbuf.sal"
+import "src/agent/compact.sal"
+import "src/agent/ctx.sal"
+import "src/agent/messages.sal"
+import "src/agent/vision.sal"
+import "src/events.sal"
+import "src/session.sal"
+import "src/provider/openai.sal"
+import "src/tools/registry.sal"
+import "src/tools/common.sal"
+
+fn loop_tool_output_cap() -> Int
+    30000
+
+# Petición al modelo con reintentos: 429 (ocupado) espera 5 s; 400 devuelve el error al modelo.
+fn chat_once(c: Int) -> Int ! io, alloc
+    t429 = 0
+    t400 = 0
+    done = 0
+    result = 0
+    while done == 0
+        r = oai_chat(c)
+        result = r
+        again = 0
+        if pr_ok(r) == 0
+            st = pr_status(r)
+            if st == 429
+                if t429 < 24
+                    w = sleep_ms(5000)
+                    t429 = t429 + 1
+                    again = 1
+            elsif st == 400
+                if t400 < 5
+                    x = sk_sl_push(ctx_msgs(c), msg_user("The server rejected your previous message: " + pr_error(r) + " Fix the problem and respond again."))
+                    t400 = t400 + 1
+                    again = 1
+        if again == 0
+            done = 1
+    result
+
+# Ejecuta una llamada del modelo y añade el mensaje `tool` al historial.
+fn run_call(c: Int, call: Int) -> Int ! io, alloc
+    id = call_id(call)
+    name = call_name(call)
+    args = call_args(call)
+    input = tool_input_json(args)
+    x = ev_tool(c, id, name, "running", input, "", name)
+    x = ctx_set_call(c, id)
+    res = tool_exec(c, name, args)
+    out = sk_truncate_middle(tr_output(res), loop_tool_output_cap())
+    if tr_failed(res) != 0
+        x = ev_tool(c, id, name, "error", input, out, tr_title(res))
+    else
+        x = ev_tool(c, id, name, "completed", input, out, tr_title(res))
+    y = sk_sl_push(ctx_msgs(c), msg_tool(id, out))
+    0
+
+# Argumentos válidos para el historial: si el modelo envió JSON roto se guarda "{}".
+fn call_sanitized(call: Int) -> Int ! alloc
+    args = call_args(call)
+    d = json_parse(args)
+    if json_ok(d) != 0
+        return call
+    call_new(call_id(call), call_name(call), "{{}}")
+
+# Ejecuta el bucle hasta la respuesta final. Devuelve 0 si terminó, 1 si hubo error del
+# modelo y 2 si se agotaron los turnos.
+fn agent_loop(c: Int) -> Int ! io, alloc
+    status = 0
+    done = 0
+    while done == 0
+        if ctx_turns(c) >= ctx_max_turns(c)
+            x = ev_error(c, "Reached the maximum number of turns (" + int_to_str(ctx_max_turns(c)) + "). Send another message to continue.")
+            status = 2
+            done = 1
+        else
+            n = ctx_inc_turns(c)
+            x = ev_step_start(c)
+            x = compact_if_needed(c)
+            r = chat_once(c)
+            if pr_ok(r) == 0
+                x = ev_error(c, pr_error(r))
+                x = ev_step_finish(c, "error", 0, 0)
+                status = 1
+                done = 1
+            else
+                x = ctx_add_tokens(c, pr_in(r), pr_out(r))
+                text = pr_text(r)
+                calls = pr_calls(r)
+                if str_len(text) > 0
+                    x = ev_text(c, text)
+                if vec_len(calls) == 0
+                    stored = text
+                    if str_len(stored) == 0
+                        stored = "(no response)"
+                        x = ev_text(c, stored)
+                    x = sk_sl_push(ctx_msgs(c), msg_assistant(stored, 0 - 1))
+                    x = ev_step_finish(c, "stop", pr_in(r), pr_out(r))
+                    done = 1
+                else
+                    clean = vec_new()
+                    k = 0
+                    while k < vec_len(calls)
+                        x = vec_push(clean, call_sanitized(vec_get(calls, k)))
+                        k = k + 1
+                    x = sk_sl_push(ctx_msgs(c), msg_assistant(text, clean))
+                    k = 0
+                    while k < vec_len(clean)
+                        x = run_call(c, vec_get(clean, k))
+                        k = k + 1
+                    x = vision_flush_pending(c)
+                    x = ev_step_finish(c, "tool-calls", pr_in(r), pr_out(r))
+        x = session_save(ctx_session(c), ctx_msgs(c))
+    status

@@ -1,13 +1,28 @@
+import * as path from 'path';
 import * as vscode from 'vscode';
-import { SuperEvent, Turn, buildPrompt } from './events';
+import { PermissionReply, SuperEvent } from './events';
+import { removeTemp, saveTempImage } from './attachments';
 import { Run, startRun } from './runner';
 import { State, cfg } from './state';
+
+interface WebviewMessage {
+  type: string;
+  text?: string;
+  id?: string;
+  reply?: PermissionReply;
+  mime?: string;
+  data?: string;
+  file?: string;
+}
 
 export class ChatView implements vscode.WebviewViewProvider {
   static readonly viewType = 'supercoder.chat';
   private view?: vscode.WebviewView;
   private run?: Run;
-  private history: Turn[] = [];
+  private sessionId = newSessionId();
+  private turns = 0;
+  private attached: string[] = [];
+
   constructor(
     private readonly ctx: vscode.ExtensionContext,
     private readonly state: State,
@@ -22,7 +37,7 @@ export class ChatView implements vscode.WebviewViewProvider {
       localResourceRoots: [vscode.Uri.joinPath(this.ctx.extensionUri, 'media')],
     };
     view.webview.html = this.html(view.webview);
-    view.webview.onDidReceiveMessage((m) => this.onMessage(m));
+    view.webview.onDidReceiveMessage((m: WebviewMessage) => this.onMessage(m));
     view.onDidDispose(() => {
       this.stop();
       this.view = undefined;
@@ -36,7 +51,10 @@ export class ChatView implements vscode.WebviewViewProvider {
 
   newChat(): void {
     this.stop();
-    this.history = [];
+    removeTemp(this.attached);
+    this.attached = [];
+    this.sessionId = newSessionId();
+    this.turns = 0;
     this.post({ type: 'clear' });
   }
 
@@ -54,7 +72,22 @@ export class ChatView implements vscode.WebviewViewProvider {
     return this.state.pickModel();
   }
 
-  private onMessage(m: { type: string; text?: string }): void {
+  /** Adjunta ficheros desde el explorador de VS Code. */
+  async attachFiles(): Promise<void> {
+    const picked = await vscode.window.showOpenDialog({ canSelectMany: true, defaultUri: vscode.Uri.file(this.state.folder()) });
+    this.addAttachments((picked ?? []).map((u) => u.fsPath));
+  }
+
+  private addAttachments(files: string[]): void {
+    for (const f of files) {
+      if (!this.attached.includes(f)) {
+        this.attached.push(f);
+      }
+    }
+    this.post({ type: 'attached', files: this.attached.map((f) => ({ path: f, name: path.basename(f) })) });
+  }
+
+  private onMessage(m: WebviewMessage): void {
     if (m.type === 'send' && m.text) {
       this.send(m.text);
     } else if (m.type === 'stop') {
@@ -63,6 +96,19 @@ export class ChatView implements vscode.WebviewViewProvider {
       void this.pickModel();
     } else if (m.type === 'newChat') {
       this.newChat();
+    } else if (m.type === 'permissionReply' && m.id && m.reply) {
+      this.run?.reply(m.id, m.reply);
+    } else if (m.type === 'attachFiles') {
+      void this.attachFiles();
+    } else if (m.type === 'attachImage' && m.data && m.mime) {
+      const f = saveTempImage(Buffer.from(m.data, 'base64'), m.mime);
+      if (f) {
+        this.addAttachments([f]);
+      }
+    } else if (m.type === 'detach' && m.file) {
+      removeTemp([m.file]);
+      this.attached = this.attached.filter((f) => f !== m.file);
+      this.addAttachments([]);
     }
   }
 
@@ -71,27 +117,28 @@ export class ChatView implements vscode.WebviewViewProvider {
       return;
     }
     const c = cfg();
-    const prompt = buildPrompt(this.history, text, c.get<number>('historyTurns', 6));
-    let answer = '';
-    this.post({ type: 'user', text });
+    const files = this.attached;
+    this.attached = [];
+    this.post({ type: 'user', text, files: files.map((f) => path.basename(f)) });
+    this.post({ type: 'attached', files: [] });
     this.post({ type: 'busy', busy: true });
+    const autoApprove = c.get<boolean>('autoApprove', false);
     this.run = startRun({
       binary: this.state.binary(),
       cwd: this.state.folder(),
-      prompt,
+      prompt: text,
       model: this.state.model,
-      maxTurns: c.get<number>('maxTurns', 40),
-      onEvent: (e: SuperEvent) => {
-        if (e.kind === 'text') {
-          answer += (answer ? '\n' : '') + e.text;
-        }
-        this.post({ type: 'event', event: e });
-      },
+      maxTurns: c.get<number>('maxTurns', 60),
+      sessionId: this.sessionId,
+      cont: this.turns > 0,
+      interactive: !autoApprove,
+      yes: autoApprove,
+      files,
+      onEvent: (e: SuperEvent) => this.post({ type: 'event', event: e }),
       onDone: (code, stderr) => {
         this.run = undefined;
-        if (answer) {
-          this.history.push({ user: text, assistant: answer });
-        }
+        this.turns += 1;
+        removeTemp(files);
         if (code !== 0 && stderr.trim()) {
           this.post({ type: 'event', event: { kind: 'error', message: stderr.trim() } });
         }
@@ -116,9 +163,13 @@ export class ChatView implements vscode.WebviewViewProvider {
 </head><body>
 <header><button id="model" title="Elegir modelo">modelo: por defecto</button><button id="new" title="Nuevo chat">Nuevo</button></header>
 <main id="log" aria-live="polite"></main>
-<form id="form"><textarea id="input" rows="3" placeholder="Pide algo a supercoder… (Enter envía, Shift+Enter salto)"></textarea>
-<div class="row"><button id="send" type="submit">Enviar</button><button id="stop" type="button" hidden>Detener</button></div></form>
+<form id="form"><div id="chips"></div><textarea id="input" rows="3" placeholder="Pide algo a supercoder… (Enter envía, Shift+Enter salto; pega imágenes con Ctrl+V)"></textarea>
+<div class="row"><button id="send" type="submit">Enviar</button><button id="attach" type="button" title="Adjuntar ficheros">Adjuntar</button><button id="stop" type="button" hidden>Detener</button></div></form>
 <script nonce="${nonce}" src="${uri('main.js')}"></script>
 </body></html>`;
   }
+}
+
+function newSessionId(): string {
+  return `vscode-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 }

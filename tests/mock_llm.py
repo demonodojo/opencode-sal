@@ -16,8 +16,20 @@ def _sse_chunk(obj: dict[str, Any]) -> bytes:
     return ("data: " + json.dumps(obj, separators=(",", ":")) + "\n\n").encode()
 
 
-def _tool_call_events(call_index: int, name: str, arguments: dict[str, Any]) -> list[bytes]:
+def _tool_call_events(call_index: int, name: str, arguments: dict[str, Any], fragments: bool = False) -> list[bytes]:
     args_str = json.dumps(arguments, separators=(",", ":"))
+    if fragments:
+        # El nombre y el id llegan primero; los argumentos en tres trozos, como hace OpenAI.
+        third = max(1, len(args_str) // 3)
+        parts = [args_str[:third], args_str[third : 2 * third], args_str[2 * third :]]
+        frames: list[dict[str, Any]] = [
+            {"choices": [{"index": 0, "delta": {"role": "assistant", "tool_calls": [{"index": 0, "id": f"call_{call_index}", "type": "function", "function": {"name": name, "arguments": ""}}]}, "finish_reason": None}]}
+        ]
+        for p in parts:
+            frames.append({"choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "function": {"arguments": p}}]}, "finish_reason": None}]})
+        frames.append({"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]})
+        frames.append({"choices": [], "usage": {"prompt_tokens": 50, "completion_tokens": 7, "total_tokens": 57}})
+        return [_sse_chunk(f) for f in frames] + [b"data: [DONE]\n\n"]
     chunks = [
         {
             "id": "chatcmpl-mock",
@@ -51,7 +63,8 @@ def _tool_call_events(call_index: int, name: str, arguments: dict[str, Any]) -> 
     return out
 
 
-def _content_events(text: str, usage: dict[str, int] | None = None) -> list[bytes]:
+def _content_events(text: str, usage: dict[str, int] | None = None, deltas: list[str] | None = None) -> list[bytes]:
+    pieces = deltas if deltas else [text]
     chunks: list[dict[str, Any]] = [
         {
             "id": "chatcmpl-mock",
@@ -59,11 +72,13 @@ def _content_events(text: str, usage: dict[str, int] | None = None) -> list[byte
             "choices": [
                 {
                     "index": 0,
-                    "delta": {"role": "assistant", "content": text},
+                    "delta": ({"role": "assistant", "content": piece} if i == 0 else {"content": piece}),
                     "finish_reason": None,
                 }
             ],
-        },
+        }
+        for i, piece in enumerate(pieces)
+    ] + [
         {
             "id": "chatcmpl-mock",
             "object": "chat.completion.chunk",
@@ -77,25 +92,70 @@ def _content_events(text: str, usage: dict[str, int] | None = None) -> list[byte
     return out
 
 
+def _json_tool_call(call_index: int, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": "chatcmpl-mock",
+        "object": "chat.completion",
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": f"call_{call_index}",
+                            "type": "function",
+                            "function": {"name": name, "arguments": json.dumps(arguments, separators=(",", ":"))},
+                        }
+                    ],
+                },
+                "finish_reason": "tool_calls",
+            }
+        ],
+        "usage": {"prompt_tokens": 50, "completion_tokens": 7, "total_tokens": 57},
+    }
+
+
+def _json_content(text: str, usage: dict[str, int] | None = None) -> dict[str, Any]:
+    return {
+        "id": "chatcmpl-mock",
+        "object": "chat.completion",
+        "choices": [
+            {"index": 0, "message": {"role": "assistant", "content": text}, "finish_reason": "stop"}
+        ],
+        "usage": usage or {"prompt_tokens": 60, "completion_tokens": 4, "total_tokens": 64},
+    }
+
+
 def load_guion(path: Path) -> dict[str, Any]:
     with path.open(encoding="utf-8") as f:
         return json.load(f)
 
 
-def steps_to_responses(steps: list[dict[str, Any]], call_counter: list[int]) -> list[list[bytes]]:
-    seq: list[list[bytes]] = []
+def steps_to_responses(steps: list[dict[str, Any]], call_counter: list[int]) -> list[dict[str, Any]]:
+    seq: list[dict[str, Any]] = []
     for step in steps:
         st = step.get("type", "tool_calls")
         if st == "tool_calls":
             call_counter[0] += 1
             name = step["name"]
             args = step.get("arguments", step.get("input", {}))
-            seq.append(_tool_call_events(call_counter[0], name, args))
+            seq.append(
+                {
+                    "sse": _tool_call_events(call_counter[0], name, args, bool(step.get("fragments"))),
+                    "json": _json_tool_call(call_counter[0], name, args),
+                }
+            )
         elif st == "content":
             usage = step.get("usage")
-            seq.append(_content_events(step.get("text", step.get("content", "ok")), usage))
+            deltas = step.get("deltas")
+            text = "".join(deltas) if deltas else step.get("text", step.get("content", "ok"))
+            seq.append({"sse": _content_events(text, usage, deltas), "json": _json_content(text, usage)})
+        elif st == "error":
+            seq.append({"status": step.get("status", 400), "json": {"error": {"message": step.get("message", "mock error")}}})
         elif st == "raw_sse":
-            seq.append([s.encode() if isinstance(s, str) else s for s in step["frames"]])
+            seq.append({"sse": [s.encode() if isinstance(s, str) else s for s in step["frames"]], "json": None})
         else:
             raise ValueError(f"tipo de paso desconocido: {st}")
     return seq
@@ -103,7 +163,7 @@ def steps_to_responses(steps: list[dict[str, Any]], call_counter: list[int]) -> 
 
 class MockState:
     def __init__(self, guion: dict[str, Any], record_dir: Path | None) -> None:
-        self.responses: list[list[bytes]] = steps_to_responses(guion.get("steps", []), [0])
+        self.responses: list[dict[str, Any]] = steps_to_responses(guion.get("steps", []), [0])
         self.i = 0
         self.record_dir = record_dir
         self.req_n = 0
@@ -139,19 +199,37 @@ def make_handler(state: MockState):
                         (state.record_dir / f"peticion-{n:02d}.raw").write_bytes(body)
 
                 if state.i >= len(state.responses):
-                    frames = _content_events("mock: sin más pasos en el guion")
+                    step = {"sse": _content_events("mock: sin más pasos en el guion"), "json": _json_content("mock: sin más pasos en el guion")}
                 else:
-                    frames = state.responses[state.i]
+                    step = state.responses[state.i]
                     state.i += 1
 
-            hdrs = (
-                "HTTP/1.1 200 OK\r\n"
-                "Content-Type: text/event-stream\r\n"
-                "Cache-Control: no-cache\r\n"
-                "Connection: close\r\n\r\n"
-            )
-            # una sola escritura: el cliente Sal hace una única lectura
-            self.wfile.write(hdrs.encode() + b"".join(frames))
+            try:
+                req = json.loads(body)
+            except json.JSONDecodeError:
+                req = {}
+            if "status" in step:
+                payload = json.dumps(step["json"]).encode()
+                hdrs = (
+                    f"HTTP/1.1 {step['status']} Mock\r\nContent-Type: application/json\r\n"
+                    f"Content-Length: {len(payload)}\r\nConnection: close\r\n\r\n"
+                )
+                self.wfile.write(hdrs.encode() + payload)
+            elif req.get("stream") is False and step.get("json") is not None:
+                payload = json.dumps(step["json"]).encode()
+                hdrs = (
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                    f"Content-Length: {len(payload)}\r\nConnection: close\r\n\r\n"
+                )
+                self.wfile.write(hdrs.encode() + payload)
+            else:
+                hdrs = (
+                    "HTTP/1.1 200 OK\r\n"
+                    "Content-Type: text/event-stream\r\n"
+                    "Cache-Control: no-cache\r\n"
+                    "Connection: close\r\n\r\n"
+                )
+                self.wfile.write(hdrs.encode() + b"".join(step["sse"]))
             self.wfile.flush()
 
     return H

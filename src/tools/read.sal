@@ -1,0 +1,96 @@
+# Herramienta read: ficheros con líneas numeradas y directorios.
+
+import "salkit/fsx.sal"
+import "salkit/strbuf.sal"
+import "src/agent/ctx.sal"
+import "src/agent/vision.sal"
+import "src/tools/common.sal"
+import "src/util.sal"
+
+fn pad5(n: Int) -> String ! alloc
+    s = int_to_str(n)
+    while str_len(s) < 5
+        s = "0" + s
+    s
+
+# Ventana de líneas [offset, offset+limit) con numeración; `more` indica si quedan líneas.
+# Devuelve un vec [texto, última línea mostrada, hay más (0/1)].
+fn read_window(text: String, offset: Int, limit: Int) -> Int ! alloc
+    n = str_len(text)
+    pos = 0
+    line = 1
+    shown = 0
+    last = 0
+    more = 0
+    out = ""
+    while pos < n
+        e = sk_index_from(text, "\n", pos)
+        if e < 0
+            e = n
+        if line >= offset
+            if shown < limit
+                te = e
+                if te > pos
+                    if str_char(text, te - 1) == 13
+                        te = te - 1
+                ln = str_slice(text, pos, te)
+                if str_len(ln) > 2000
+                    ln = str_slice(ln, 0, 2000) + "... [line truncated]"
+                out = out + pad5(line) + "| " + ln + char_to_str(10)
+                shown = shown + 1
+                last = line
+            else
+                more = 1
+                pos = n
+        line = line + 1
+        pos = e + 1
+    r = vec_new()
+    x = vec_push(r, str_as_int(out))
+    x = vec_push(r, last)
+    x = vec_push(r, more)
+    r
+
+fn read_dir_listing(path: String) -> String ! io, alloc
+    names = fsx_list_dir(path)
+    out = ""
+    n = sk_sl_len(names)
+    i = 0
+    while i < n
+        out = out + sk_sl_get(names, i) + char_to_str(10)
+        i = i + 1
+    out
+
+fn tool_read(c: Int, d: Int, a: Int) -> Int ! io, alloc
+    raw = arg_str(d, a, "filePath,file_path,path,file", "")
+    path = path_abs(raw)
+    if fsx_exists(path) == 0
+        return tr_err("File not found: " + path)
+    if fsx_is_dir(path) != 0
+        listing = read_dir_listing(path)
+        return tr_ok("<directory>" + char_to_str(10) + listing + "</directory>", path_rel(cwd_path(), path))
+    if img_is_image(path) != 0
+        rel = path_rel(cwd_path(), path)
+        if fsx_size(path) > img_max_bytes()
+            return tr_err("Image too large (limit 5 MB): " + path)
+        if ctx_vision(c) != 0
+            x = ctx_set_pending(c, ctx_pending(c) + path + char_to_str(10))
+            return tr_ok("Image file " + rel + " read; the image is attached in the next message.", rel)
+        return tr_ok(vision_describe(c, path, "Describe this image"), rel)
+    text = fsx_read_text_max(path, 4194304)
+    if looks_binary(text) != 0
+        return tr_err("Cannot read binary file: " + path)
+    offset = arg_int(d, a, "offset", 1)
+    if offset < 1
+        offset = 1
+    limit = arg_int(d, a, "limit", 2000)
+    if limit < 1
+        limit = 2000
+    w = read_window(text, offset, limit)
+    body = str_from_int(vec_get(w, 0))
+    out = "<file>" + char_to_str(10) + body
+    if vec_get(w, 2) != 0
+        out = out + char_to_str(10) + "(File has more lines. Use the 'offset' parameter to read beyond line " + int_to_str(vec_get(w, 1)) + ")" + char_to_str(10)
+    elsif str_len(body) == 0
+        out = out + "(empty file or offset past the end)" + char_to_str(10)
+    out = out + "</file>"
+    tr_ok(out, path_rel(cwd_path(), path))

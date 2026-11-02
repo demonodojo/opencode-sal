@@ -1,0 +1,54 @@
+import "../../src/tools/registry.sal"
+import "../../src/agent/prompt.sal"
+import "salkit/json.sal"
+import "support/assert.sal"
+
+fn main() -> Int ! io, alloc
+    f = 0
+    f = f + ck_str(tool_canon("Read_File"), "read", 1)
+    f = f + ck_str(tool_canon("reemplazar_texto"), "edit", 2)
+    f = f + ck_str(tool_canon("bash"), "bash", 3)
+    f = f + ck_int(tool_known("grep"), 1, 4)
+    f = f + ck_int(tool_known("nope"), 0, 5)
+    f = f + ck_int(tool_allowed("", "bash"), 1, 6)
+    f = f + ck_int(tool_allowed("read,grep", "bash"), 0, 7)
+    f = f + ck_int(tool_allowed("read,grep", "grep"), 1, 8)
+
+    defs = tools_defs("")
+    d = json_parse(defs)
+    f = f + ck_int(json_ok(d), 1, 10)
+    f = f + ck_int(json_len(d, json_root(d)) >= 9, 1, 11)
+    first = json_at(d, json_root(d), 0)
+    f = f + ck_str(json_str(d, json_path(d, first, "function.name")), "read", 12)
+    f = f + ck_str(json_str(d, json_path(d, first, "function.parameters.required.0")), "filePath", 13)
+    f = f + ck_str(json_str(d, json_path(d, first, "type")), "function", 14)
+    d2 = json_parse(tools_defs("grep,bash"))
+    f = f + ck_int(json_len(d2, json_root(d2)), 2, 15)
+
+    c = ctx_new()
+    x = ctx_set_shell(c, "/bin/sh")
+    r = tool_exec(c, "read", "{{\"path\":\"README.md\"}}")
+    f = f + ck_int(tr_failed(r), 0, 20)
+    f = f + ck_contains(tr_output(r), "supercoder-sal", 21)
+    r2 = tool_exec(c, "read", "{{}}")
+    f = f + ck_int(tr_failed(r2), 1, 22)
+    f = f + ck_contains(tr_output(r2), "Missing required parameter 'filePath'", 23)
+    r3 = tool_exec(c, "frobnicate", "{{}}")
+    f = f + ck_contains(tr_output(r3), "Unknown tool", 24)
+    r4 = tool_exec(c, "read", "not json")
+    f = f + ck_contains(tr_output(r4), "not valid JSON", 25)
+    r5 = tool_exec(c, "edit", "{{\"filePath\":\"x\",\"oldString\":\"a\"}}")
+    f = f + ck_contains(tr_output(r5), "'newString'", 26)
+    x = ctx_set_allow(c, "read")
+    r6 = tool_exec(c, "bash", "{{\"command\":\"echo hi\"}}")
+    f = f + ck_contains(tr_output(r6), "not available", 27)
+    r7 = tool_exec(c, "bash", "")
+    f = f + ck_int(tr_failed(r7), 1, 28)
+    f = f + ck_str(tool_input_json("{{ \"a\" : 1 }}"), "{{\"a\":1}}", 29)
+    f = f + ck_str(tool_input_json("garbage"), "{{}}", 30)
+
+    sp = prompt_build(c, "")
+    f = f + ck_contains(sp, "You are supercoder", 31)
+    f = f + ck_contains(sp, "Working directory:", 32)
+    f = f + ck_contains(sp, "Shell: /bin/sh", 33)
+    f

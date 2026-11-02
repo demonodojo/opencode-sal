@@ -1,0 +1,65 @@
+import "../../src/agent/compact.sal"
+import "salkit/json.sal"
+import "support/assert.sal"
+
+fn mkcfg(text: String) -> Int ! alloc
+    c = vec_new()
+    x = vec_push(c, json_parse(text))
+    x = vec_push(c, str_as_int(text))
+    c
+
+fn big(n: Int) -> String ! alloc
+    s = ""
+    i = 0
+    while i < n
+        s = s + "0123456789"
+        i = i + 1
+    s
+
+# user + k pares (assistant con llamada, resultado de herramienta)
+fn history(k: Int) -> Int ! alloc
+    msgs = sk_sl_new()
+    x = sk_sl_push(msgs, msg_user("fix the bug"))
+    i = 0
+    while i < k
+        id = "call_" + int_to_str(i)
+        calls = vec_new()
+        y = vec_push(calls, call_new(id, "write", "{{\"filePath\":\"a\",\"content\":\"" + big(200) + "\"}}"))
+        x = sk_sl_push(msgs, msg_assistant("", calls))
+        x = sk_sl_push(msgs, msg_tool(id, big(100)))
+        i = i + 1
+    msgs
+
+fn main() -> Int ! io, alloc
+    f = 0
+    c = ctx_new()
+    x = ctx_set_cfg(c, mkcfg("{{\"models\":{{\"soso-coder\":{{\"port\":1,\"context_chars\":20000}}}}}}"))
+    x = ctx_set_model(c, "soso-coder")
+    x = ctx_set_msgs(c, history(5))
+    f = f + ck_int(compact_over(c), 0, 1)
+    f = f + ck_int(compact_if_needed(c), 0, 2)
+
+    x = ctx_set_msgs(c, history(14))
+    f = f + ck_int(sk_sl_len(ctx_msgs(c)), 29, 3)
+    f = f + ck_int(compact_over(c), 1, 4)
+    t = compact_trim(c)
+    f = f + ck_int(t > 0, 1, 5)
+    f = f + ck_int(sk_sl_len(ctx_msgs(c)), 29, 6)
+    f = f + ck_contains(sk_sl_get(ctx_msgs(c), 2), "[output trimmed", 7)
+    f = f + ck_contains(sk_sl_get(ctx_msgs(c), 1), "arguments omitted", 8)
+    # la cola queda intacta
+    f = f + ck_int(str_len(sk_sl_get(ctx_msgs(c), 28)) > 900, 1, 9)
+
+    # demasiados mensajes: se resume (sin servidor -> resumen mecánico) y la cola empieza válida
+    x = ctx_set_msgs(c, history(40))
+    f = f + ck_int(sk_sl_len(ctx_msgs(c)), 81, 10)
+    f = f + ck_int(compact_if_needed(c), 1, 11)
+    msgs = ctx_msgs(c)
+    f = f + ck_int(sk_sl_len(msgs) <= 12, 1, 12)
+    f = f + ck_str(compact_role(sk_sl_get(msgs, 0)), "user", 13)
+    f = f + ck_contains(sk_sl_get(msgs, 0), "Original request", 14)
+    f = f + ck_contains(sk_sl_get(msgs, 0), "fix the bug", 15)
+    f = f + ck_contains(sk_sl_get(msgs, 0), "Tools used so far", 16)
+    f = f + ck_int(str_eq(compact_role(sk_sl_get(msgs, 1)), "tool"), 0, 17)
+    f = f + ck_int(compact_over(c), 0, 18)
+    f

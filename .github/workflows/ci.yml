@@ -24,6 +24,11 @@ jobs:
           ref: main
           path: sal
 
+      - uses: actions/checkout@v4
+        with:
+          repository: demonodojo/salkit
+          path: salkit
+
       - name: Instalar Rust
         uses: dtolnay/rust-toolchain@stable
 
@@ -40,3 +45,4 @@ jobs:
           ./scripts/release-build.sh
           ./tests/probar_http.sh
           ./tests/probar_tui.sh
+          python3 tests/diff_referencia.py

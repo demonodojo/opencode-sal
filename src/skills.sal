@@ -1,18 +1,77 @@
-import "io/fs.sal"
+# Skills: instrucciones especializadas en <dir>/<nombre>/SKILL.md con frontmatter
+# (name, description). Se buscan en .supercoder/skills, .opencode/skills y .claude/skills; la
+# primera con un nombre gana. El prompt lista los nombres y la herramienta `skill` carga el cuerpo.
 
-fn skill_load(path: String) -> String ! io, alloc
-    read_file(path)
+import "salkit/fsx.sal"
+import "salkit/strbuf.sal"
+import "salkit/frontmatter.sal"
+import "src/tools/common.sal"
+import "src/util.sal"
 
-fn skills_append_default(base: String) -> String ! io, alloc
-    s1 = skill_load(".supercoder/skills/soso-self-improvement/SKILL.md")
-    if str_len(s1) > 0
-        base + "\n\n--- skill ---\n" + s1
-    else
-        s2 = skill_load(".claude/skills/soso-self-improvement/SKILL.md")
-        if str_len(s2) > 0
-            base + "\n\n--- skill ---\n" + s2
-        else
-            base
+fn skills_dirs() -> Int ! alloc
+    sl = sk_sl_new()
+    x = sk_sl_push(sl, ".supercoder/skills")
+    x = sk_sl_push(sl, ".opencode/skills")
+    x = sk_sl_push(sl, ".claude/skills")
+    sl
 
-fn sal_tool_manifest(path: String) -> String ! io, alloc
-    read_file(path)
+# Entradas "nombre<TAB>descripción<TAB>ruta del SKILL.md" de los skills encontrados.
+fn skills_scan() -> Int ! io, alloc
+    out = sk_sl_new()
+    seen = sk_sl_new()
+    tab = char_to_str(9)
+    dirs = skills_dirs()
+    di = 0
+    while di < sk_sl_len(dirs)
+        dir = sk_sl_get(dirs, di)
+        names = fsx_list_dir(dir)
+        i = 0
+        while i < sk_sl_len(names)
+            nm = sk_sl_get(names, i)
+            if sk_ends_with(nm, "/") != 0
+                folder = str_slice(nm, 0, str_len(nm) - 1)
+                file = dir + "/" + folder + "/SKILL.md"
+                if fsx_is_file(file) != 0
+                    fm = fm_parse(fsx_read_text_max(file, 200000))
+                    name = sk_trim(fm_get(fm, "name"))
+                    if str_len(name) == 0
+                        name = folder
+                    if sk_sl_contains(seen, name) == 0
+                        x = sk_sl_push(seen, name)
+                        desc = sk_replace_all(sk_trim(fm_get(fm, "description")), char_to_str(10), " ")
+                        x = sk_sl_push(out, name + tab + desc + tab + file)
+            i = i + 1
+        di = di + 1
+    out
+
+# Sección del prompt de sistema ("" si no hay skills).
+fn skills_prompt() -> String ! io, alloc
+    all = skills_scan()
+    if sk_sl_len(all) == 0
+        return ""
+    nl = char_to_str(10)
+    out = "# Skills" + nl + "Specialized instructions are available through the skill tool. Load a skill when the task matches its description:"
+    i = 0
+    while i < sk_sl_len(all)
+        parts = sk_split_char(sk_sl_get(all, i), 9)
+        out = out + nl + "- " + sk_sl_get(parts, 0) + ": " + sk_sl_get(parts, 1)
+        i = i + 1
+    out
+
+fn tool_skill(c: Int, d: Int, a: Int) -> Int ! io, alloc
+    want = sk_trim(arg_str(d, a, "name", ""))
+    all = skills_scan()
+    names = sk_sl_new()
+    i = 0
+    while i < sk_sl_len(all)
+        parts = sk_split_char(sk_sl_get(all, i), 9)
+        x = sk_sl_push(names, sk_sl_get(parts, 0))
+        if str_eq(sk_sl_get(parts, 0), want) != 0
+            file = sk_sl_get(parts, 2)
+            fm = fm_parse(fsx_read_text_max(file, 200000))
+            nl = char_to_str(10)
+            base = path_abs(str_slice(file, 0, str_len(file) - 9))
+            body = "<skill_content name=\"" + want + "\">" + nl + fm_body(fm) + nl + nl + "Base directory for this skill: " + base + nl + "</skill_content>"
+            return tr_ok(body, "Loaded skill: " + want)
+        i = i + 1
+    tr_err("Skill '" + want + "' not found. Available skills: " + sk_join(names, ", "))

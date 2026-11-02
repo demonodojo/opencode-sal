@@ -1,8 +1,24 @@
 import "io/process.sal"
 import "io/io.sal"
 
+# Lanza `supercoder run --format json --yes PROMPT`: la campaña no tiene cliente al que
+# preguntar, así que los permisos `ask` se aprueban.
 fn ejecutor_run(prompt: String) -> Int ! io, alloc
-    spawn_io_5("/bin/supercoder", "run", "--format", "json", prompt, 0, 1, 2, -1)
+    path = "/bin/supercoder"
+    pbuf = spawn_string_buf(path)
+    b1 = spawn_string_buf("run")
+    b2 = spawn_string_buf("--format")
+    b3 = spawn_string_buf("json")
+    b4 = spawn_string_buf("--yes")
+    b5 = spawn_string_buf(prompt)
+    tab = bytes_new(96)
+    _p = spawn_argv_slot_ptr(tab, 0, pbuf, str_len(path))
+    _1 = spawn_argv_slot_ptr(tab, 1, b1, 3)
+    _2 = spawn_argv_slot_ptr(tab, 2, b2, 8)
+    _3 = spawn_argv_slot_ptr(tab, 3, b3, 4)
+    _4 = spawn_argv_slot_ptr(tab, 4, b4, 5)
+    _5 = spawn_argv_slot_ptr(tab, 5, b5, str_len(prompt))
+    spawn_io_argv(path, 6, tab, 0, 1, 2, d"", -1)
 
 fn emit_event(kind: String) -> Int ! io, alloc
     write_str_fd(1, "event:" + kind + "\n")

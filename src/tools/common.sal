@@ -1,0 +1,123 @@
+# Base común de las herramientas: resultados y acceso tolerante a los argumentos.
+#
+# Un resultado es un vec: 0 estado (0 ok, 1 error), 1 salida, 2 título.
+
+import "salkit/json.sal"
+import "salkit/strbuf.sal"
+import "salkit/fsx.sal"
+
+fn tr_ok(output: String, title: String) -> Int ! alloc
+    r = vec_new()
+    x = vec_push(r, 0)
+    x = vec_push(r, str_as_int(output))
+    x = vec_push(r, str_as_int(title))
+    r
+
+fn tr_err(msg: String) -> Int ! alloc
+    r = vec_new()
+    x = vec_push(r, 1)
+    x = vec_push(r, str_as_int(msg))
+    x = vec_push(r, str_as_int("error"))
+    r
+
+fn tr_failed(r: Int) -> Int
+    vec_get(r, 0)
+
+fn tr_output(r: Int) -> String
+    str_from_int(vec_get(r, 1))
+
+fn tr_title(r: Int) -> String
+    str_from_int(vec_get(r, 2))
+
+# Primer argumento presente entre los alias "a,b,c"; -1 si no hay ninguno.
+fn arg_node(d: Int, n: Int, names: String) -> Int ! alloc
+    if json_kind(d, n) != 6
+        return 0 - 1
+    parts = sk_split_char(names, 44)
+    i = 0
+    cnt = sk_sl_len(parts)
+    while i < cnt
+        k = json_get(d, n, sk_sl_get(parts, i))
+        if k >= 0
+            return k
+        i = i + 1
+    0 - 1
+
+fn arg_has(d: Int, n: Int, names: String) -> Int ! alloc
+    if arg_node(d, n, names) >= 0
+        1
+    else
+        0
+
+# Texto del argumento (los números y booleanos se convierten); `dflt` si falta o es null.
+fn arg_str(d: Int, n: Int, names: String, dflt: String) -> String ! alloc
+    k = arg_node(d, n, names)
+    if k < 0
+        return dflt
+    kind = json_kind(d, k)
+    if kind == 3
+        return json_str(d, k)
+    if kind == 4
+        return json_str(d, k)
+    if kind == 2
+        return "true"
+    if kind == 1
+        return "false"
+    dflt
+
+fn arg_int(d: Int, n: Int, names: String, dflt: Int) -> Int ! alloc
+    k = arg_node(d, n, names)
+    if k < 0
+        return dflt
+    kind = json_kind(d, k)
+    if kind == 4
+        return json_int(d, k)
+    if kind == 3
+        s = sk_trim(json_str(d, k))
+        if sk_is_int(s) != 0
+            return sk_parse_int(s)
+    dflt
+
+fn arg_bool(d: Int, n: Int, names: String, dflt: Int) -> Int ! alloc
+    k = arg_node(d, n, names)
+    if k < 0
+        return dflt
+    kind = json_kind(d, k)
+    if kind == 2
+        return 1
+    if kind == 1
+        return 0
+    if kind == 3
+        s = sk_lower(sk_trim(json_str(d, k)))
+        if str_eq(s, "true") != 0
+            return 1
+        if str_eq(s, "false") != 0
+            return 0
+    dflt
+
+# Nombres que las búsquedas recursivas se saltan.
+fn default_ignores() -> Int ! alloc
+    sl = sk_sl_new()
+    x = sk_sl_push(sl, ".git")
+    x = sk_sl_push(sl, "node_modules")
+    x = sk_sl_push(sl, "target")
+    x = sk_sl_push(sl, "out")
+    x = sk_sl_push(sl, "dist")
+    x = sk_sl_push(sl, "__pycache__")
+    x = sk_sl_push(sl, ".venv")
+    x = sk_sl_push(sl, "venv")
+    x = sk_sl_push(sl, "sal_modules")
+    x = sk_sl_push(sl, ".cache")
+    sl
+
+# 1 si los primeros bytes contienen un NUL (fichero binario).
+fn looks_binary(text: String) -> Int
+    n = str_len(text)
+    if n > 4096
+        n = 4096
+    i = 0
+    while i < n
+        if str_char(text, i) == 0
+            return 1
+        i = i + 1
+    0

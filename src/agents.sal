@@ -1,0 +1,197 @@
+# Agentes: perfiles con herramientas, permisos y prompt propios.
+#
+# Integrados: build (primario, todo), plan (primario, solo lectura), general y explore (subagentes).
+# Personalizados: .supercoder/agents/NOMBRE.md, .opencode/agents/NOMBRE.md y .claude/agents/NOMBRE.md
+# con frontmatter (description, mode: primary|subagent|all, model, tools, permission) y el prompt en
+# el cuerpo. `tools` es una lista ("read, grep") o un mapa ("edit: false"); `permission` usa el
+# mismo formato que la sección "permission" de supercoder.json.
+#
+# Un agente es un vec: 0 nombre, 1 descripción, 2 modo, 3 modelo, 4 herramientas permitidas
+# ("" = todas), 5 permisos (objeto JSON como texto), 6 prompt.
+
+import "salkit/json.sal"
+import "salkit/fsx.sal"
+import "salkit/strbuf.sal"
+import "salkit/frontmatter.sal"
+import "src/tools/names.sal"
+
+fn ag_new(name: String, desc: String, mode: String, model: String, allow: String, perm: String, prompt: String) -> Int ! alloc
+    a = vec_new()
+    x = vec_push(a, str_as_int(name))
+    x = vec_push(a, str_as_int(desc))
+    x = vec_push(a, str_as_int(mode))
+    x = vec_push(a, str_as_int(model))
+    x = vec_push(a, str_as_int(allow))
+    x = vec_push(a, str_as_int(perm))
+    x = vec_push(a, str_as_int(prompt))
+    a
+
+fn ag_name(a: Int) -> String
+    str_from_int(vec_get(a, 0))
+
+fn ag_desc(a: Int) -> String
+    str_from_int(vec_get(a, 1))
+
+fn ag_mode(a: Int) -> String
+    str_from_int(vec_get(a, 2))
+
+fn ag_model(a: Int) -> String
+    str_from_int(vec_get(a, 3))
+
+fn ag_allow(a: Int) -> String
+    str_from_int(vec_get(a, 4))
+
+fn ag_perm(a: Int) -> String
+    str_from_int(vec_get(a, 5))
+
+fn ag_prompt(a: Int) -> String
+    str_from_int(vec_get(a, 6))
+
+# 1 si puede ejecutarse como agente principal / como subagente.
+fn ag_is_primary(a: Int) -> Int ! alloc
+    if str_eq(ag_mode(a), "subagent") != 0
+        return 0
+    1
+
+fn ag_is_sub(a: Int) -> Int ! alloc
+    if str_eq(ag_mode(a), "primary") != 0
+        return 0
+    1
+
+fn agents_builtin() -> Int ! alloc
+    nl = char_to_str(10)
+    out = vec_new()
+    x = vec_push(out, ag_new("build", "Default agent with every tool enabled, for implementing changes.", "primary", "", "", "", ""))
+    plan_prompt = "# Plan mode" + nl + "You are in plan mode: investigate and plan, but do not change anything. You cannot edit or write files; use read-only tools (and read-only commands) to understand the code, then answer with a concrete step-by-step implementation plan that names the files and functions to change. Ask the user a short question if a decision is theirs to make."
+    x = vec_push(out, ag_new("plan", "Plan mode: read-only analysis that produces an implementation plan.", "primary", "", "read,list,glob,grep,bash,todowrite,todoread,skill,task", "{{\"edit\":\"deny\"}}", plan_prompt))
+    general_prompt = "# Subagent" + nl + "You are a subagent working on one self-contained task for another agent. Complete the task fully using the tools, then end with a concise report of what you did and found: file paths, line numbers and results. That final message is the only thing the other agent sees."
+    x = vec_push(out, ag_new("general", "General-purpose agent for researching complex questions and running multi-step tasks in parallel with the main work.", "subagent", "", "", "", general_prompt))
+    explore_prompt = "# Subagent: explore" + nl + "You are a fast, read-only code exploration agent. Find files with glob, search contents with grep, read what matters, and answer with the precise locations (path:line) and a short explanation. Do not modify anything. Your final message is the only thing the calling agent sees, so include all the findings."
+    x = vec_push(out, ag_new("explore", "Fast read-only agent for searching a codebase: finding files, symbols and how things work.", "subagent", "", "read,list,glob,grep,bash,skill", "{{\"edit\":\"deny\"}}", explore_prompt))
+    out
+
+fn agents_dirs() -> Int ! alloc
+    sl = sk_sl_new()
+    x = sk_sl_push(sl, ".supercoder/agents")
+    x = sk_sl_push(sl, ".opencode/agents")
+    x = sk_sl_push(sl, ".opencode/agent")
+    x = sk_sl_push(sl, ".claude/agents")
+    sl
+
+# Herramientas permitidas según `tools` del frontmatter ("" = todas).
+fn agents_allow_from(d: Int, n: Int) -> String ! alloc
+    if n < 0
+        return ""
+    if json_is_string(d, n) != 0
+        names = sk_sl_new()
+        parts = sk_split_char(sk_replace_all(json_str(d, n), " ", ","), 44)
+        i = 0
+        while i < sk_sl_len(parts)
+            p = sk_trim(sk_sl_get(parts, i))
+            if str_len(p) > 0
+                x = sk_sl_push(names, tool_canon(p))
+            i = i + 1
+        return sk_join(names, ",")
+    if json_is_array(d, n) != 0
+        names = sk_sl_new()
+        k = json_first(d, n)
+        while k >= 0
+            x = sk_sl_push(names, tool_canon(json_str(d, k)))
+            k = json_next(d, k)
+        return sk_join(names, ",")
+    if json_is_object(d, n) != 0
+        off = sk_sl_new()
+        k = json_first(d, n)
+        while k >= 0
+            if json_kind(d, k) == 1
+                x = sk_sl_push(off, tool_canon(json_key(d, k)))
+            k = json_next(d, k)
+        if sk_sl_len(off) == 0
+            return ""
+        keep = sk_sl_new()
+        all = sk_split_char(tools_all_names(), 44)
+        i = 0
+        while i < sk_sl_len(all)
+            if sk_sl_contains(off, sk_sl_get(all, i)) == 0
+                x = sk_sl_push(keep, sk_sl_get(all, i))
+            i = i + 1
+        return sk_join(keep, ",")
+    ""
+
+fn agents_load_file(path: String, name: String) -> Int ! io, alloc
+    fm = fm_parse(fsx_read_text_max(path, 100000))
+    d = fm_doc(fm)
+    r = fm_root(fm)
+    mode = sk_lower(sk_trim(fm_get(fm, "mode")))
+    if str_len(mode) == 0
+        mode = "all"
+    perm = ""
+    pn = json_get(d, r, "permission")
+    if pn >= 0
+        if json_is_object(d, pn) != 0
+            perm = json_dump(d, pn)
+    ag_new(name, sk_trim(fm_get(fm, "description")), mode, sk_trim(fm_get(fm, "model")), agents_allow_from(d, json_get(d, r, "tools")), perm, sk_trim(fm_body(fm)))
+
+# Todos los agentes: los integrados y los de los directorios (un personalizado sustituye al integrado).
+fn agents_all() -> Int ! io, alloc
+    out = agents_builtin()
+    dirs = agents_dirs()
+    di = 0
+    while di < sk_sl_len(dirs)
+        dir = sk_sl_get(dirs, di)
+        files = fsx_list_dir(dir)
+        i = 0
+        while i < sk_sl_len(files)
+            f = sk_sl_get(files, i)
+            if sk_ends_with(f, ".md") != 0
+                name = str_slice(f, 0, str_len(f) - 3)
+                if agent_index(out, name) < 0
+                    x = vec_push(out, agents_load_file(dir + "/" + f, name))
+                elsif agents_is_builtin(name) != 0
+                    x = vec_set(out, agent_index(out, name), agents_load_file(dir + "/" + f, name))
+            i = i + 1
+        di = di + 1
+    out
+
+fn agents_is_builtin(name: String) -> Int ! alloc
+    if str_eq(name, "build") != 0
+        return 1
+    if str_eq(name, "plan") != 0
+        return 1
+    if str_eq(name, "general") != 0
+        return 1
+    if str_eq(name, "explore") != 0
+        return 1
+    0
+
+# Posición del agente `name` en la lista, o -1.
+fn agent_index(list: Int, name: String) -> Int ! alloc
+    i = 0
+    while i < vec_len(list)
+        if str_eq(ag_name(vec_get(list, i)), name) != 0
+            return i
+        i = i + 1
+    0 - 1
+
+# Agente por nombre, o -1.
+fn agent_find(name: String) -> Int ! io, alloc
+    all = agents_all()
+    i = agent_index(all, name)
+    if i < 0
+        return 0 - 1
+    vec_get(all, i)
+
+# Una línea por agente: "nombre (modo): descripción".
+fn agents_describe(subagents_only: Int) -> String ! io, alloc
+    all = agents_all()
+    lines = sk_sl_new()
+    i = 0
+    while i < vec_len(all)
+        a = vec_get(all, i)
+        show = 1
+        if subagents_only != 0
+            show = ag_is_sub(a)
+        if show != 0
+            x = sk_sl_push(lines, ag_name(a) + " (" + ag_mode(a) + "): " + ag_desc(a))
+        i = i + 1
+    sk_join(lines, char_to_str(10))

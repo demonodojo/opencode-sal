@@ -1,0 +1,73 @@
+{
+  "name": "compact",
+  "description": "Nueve lecturas grandes para forzar la compactaci\u00f3n",
+  "steps": [
+    {
+      "type": "tool_calls",
+      "name": "read",
+      "arguments": {
+        "filePath": "/tmp/oc-big.txt"
+      }
+    },
+    {
+      "type": "tool_calls",
+      "name": "read",
+      "arguments": {
+        "filePath": "/tmp/oc-big.txt"
+      }
+    },
+    {
+      "type": "tool_calls",
+      "name": "read",
+      "arguments": {
+        "filePath": "/tmp/oc-big.txt"
+      }
+    },
+    {
+      "type": "tool_calls",
+      "name": "read",
+      "arguments": {
+        "filePath": "/tmp/oc-big.txt"
+      }
+    },
+    {
+      "type": "tool_calls",
+      "name": "read",
+      "arguments": {
+        "filePath": "/tmp/oc-big.txt"
+      }
+    },
+    {
+      "type": "tool_calls",
+      "name": "read",
+      "arguments": {
+        "filePath": "/tmp/oc-big.txt"
+      }
+    },
+    {
+      "type": "tool_calls",
+      "name": "read",
+      "arguments": {
+        "filePath": "/tmp/oc-big.txt"
+      }
+    },
+    {
+      "type": "tool_calls",
+      "name": "read",
+      "arguments": {
+        "filePath": "/tmp/oc-big.txt"
+      }
+    },
+    {
+      "type": "tool_calls",
+      "name": "read",
+      "arguments": {
+        "filePath": "/tmp/oc-big.txt"
+      }
+    },
+    {
+      "type": "content",
+      "text": "fin"
+    }
+  ]
+}

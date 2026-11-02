@@ -1,0 +1,20 @@
+import "../../src/util.sal"
+import "../../src/config.sal"
+import "../../src/session.sal"
+import "../../src/events.sal"
+import "support/assert.sal"
+
+fn main() -> Int ! io, alloc
+    f = 0
+    f = f + ck_str(path_norm("/a/b/../c//./d"), "/a/c/d", 1)
+    f = f + ck_str(path_norm("a/../../b"), "../b", 2)
+    f = f + ck_str(path_norm("/.."), "/", 3)
+    f = f + ck_str(path_norm("./x"), "x", 4)
+    f = f + ck_str(path_norm("."), ".", 5)
+    f = f + ck_str(path_rel("/a/b", "/a/b/c/d.txt"), "c/d.txt", 6)
+    f = f + ck_str(path_rel("/a/b", "/a/bc/d"), "/a/bc/d", 7)
+    f = f + ck_str(date_from_secs(0), "1970-01-01", 8)
+    f = f + ck_str(date_from_secs(1709164800), "2024-02-29", 9)
+    f = f + ck_str(date_from_secs(1798675200), "2026-12-31", 10)
+    f = f + ck_str(date_from_secs(1767225600), "2026-01-01", 11)
+    f

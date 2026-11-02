@@ -43,7 +43,7 @@ export class State {
     return fs.existsSync(built) ? built : 'supercoder';
   }
 
-  private readProjectConfig(): string | undefined {
+  projectConfig(): string | undefined {
     try {
       return fs.readFileSync(path.join(this.folder(), 'supercoder.json'), 'utf8');
     } catch {
@@ -52,7 +52,7 @@ export class State {
   }
 
   choices(): string[] {
-    return modelChoices(this.readProjectConfig(), cfg().get<string[]>('models', []));
+    return modelChoices(this.projectConfig(), cfg().get<string[]>('models', []));
   }
 
   async pickModel(): Promise<void> {

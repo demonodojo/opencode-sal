@@ -1,5 +1,9 @@
-import "agent_run.sal"
 import "io/io.sal"
+import "salkit/json.sal"
+import "salkit/strbuf.sal"
+import "src/agent/child.sal"
+import "src/config.sal"
+import "src/events.sal"
 
 fn tui_eof_marker() -> String
     "###TUI_EOF###"
@@ -76,8 +80,8 @@ fn tui_bar_row(extra: String, side_on: Int, side: String) -> String ! alloc
     else
         head + tui_pad(extra, 49) + "  " + side
 
-fn tui_agent_row(side_on: Int, side: String) -> String ! alloc
-    model = config_model()
+fn tui_agent_row(side_on: Int, side: String) -> String ! alloc, io
+    model = cfg_model_for(cfg_load(), "")
     plain = 14 + str_len(model)
     head = "    " + tui_cyan() + "┃" + tui_reset() + "  " + tui_cyan() + "Build" + tui_reset() + "  " + model
     if side_on == 0
@@ -100,7 +104,7 @@ fn tui_hint_row(side_on: Int) -> String ! alloc
     if side_on == 0
         head
     else
-        mark = tui_green() + "• " + tui_reset() + tui_bold() + "SuperCoder" + tui_reset() + "  " + tui_dim() + "0.4.1" + tui_reset()
+        mark = tui_green() + "• " + tui_reset() + tui_bold() + "SuperCoder" + tui_reset() + "  " + tui_dim() + "0.5.0" + tui_reset()
         head + tui_spaces(39) + "  " + mark
 
 fn tui_prompt_block(top: Int, side_on: Int) -> Int ! io, alloc
@@ -209,7 +213,7 @@ fn tui_paint(s: String, i: Int, row: Int) -> Int ! io, alloc
 fn tui_draw_session() -> Int ! io, alloc
     _c = tui_clear()
     _b = tui_nl("")
-    view = tui_tail(oc_tui_log_read())
+    view = tui_tail(ev_tui_log_read())
     n = tui_paint(view, 0, 2)
     _g = tui_nl("")
     tui_prompt_block(n + 3, 1)
@@ -246,6 +250,81 @@ fn tui_is_quit(line: String) -> Int ! alloc
     else
         0
 
+# Ejecutable que corre cada turno: argv(0) o /bin/supercoder.
+fn tui_binary() -> String ! io, alloc
+    a0 = argv(0)
+    if sk_contains(a0, "/") != 0
+        return a0
+    "/bin/supercoder"
+
+# Línea de registro para un evento de herramienta en marcha (también dentro de subagentes).
+fn tui_log_tool(d: Int, ev: Int) -> Int ! io, alloc
+    if str_eq(json_get_str(d, ev, "type"), "tool_use") != 0
+        part = json_get(d, ev, "part")
+        if str_eq(json_get_str(d, json_get(d, part, "state"), "status"), "running") != 0
+            return ev_tui_log_add("tool " + json_get_str(d, part, "tool"))
+    0
+
+# Pregunta si se concede un permiso: devuelve la respuesta para el hijo.
+fn tui_ask_permission(title: String) -> String ! io, alloc
+    _l = ev_tui_log_add("permiso: " + title + "  [s]i / [a]siempre / [N]o")
+    _d = tui_draw_session()
+    ans = sk_lower(sk_trim(tui_read_line_go("")))
+    if str_eq(ans, "s") != 0
+        return "once"
+    if str_eq(ans, "si") != 0
+        return "once"
+    if str_eq(ans, "y") != 0
+        return "once"
+    if str_eq(ans, "a") != 0
+        return "always"
+    "reject"
+
+# Un turno: lanza `supercoder run` como proceso hijo y vuelca sus eventos en el registro.
+fn tui_turn(line: String, cont: Int) -> Int ! io, alloc
+    args = sk_sl_new()
+    _a1 = sk_sl_push(args, "run")
+    _a2 = sk_sl_push(args, "--format")
+    _a3 = sk_sl_push(args, "json")
+    _a4 = sk_sl_push(args, "--session")
+    _a5 = sk_sl_push(args, "default")
+    _a6 = sk_sl_push(args, "--interactive")
+    if cont != 0
+        _a7 = sk_sl_push(args, "--continue")
+    _a8 = sk_sl_push(args, "--")
+    _a9 = sk_sl_push(args, line)
+    h = child_start(tui_binary(), args)
+    if h < 0
+        return ev_tui_log_add("error: no se pudo lanzar " + tui_binary())
+    go = 1
+    while go != 0
+        raw = child_read_line(h, 7200000)
+        if str_eq(raw, char_to_str(4)) != 0
+            go = 0
+        else
+            d = json_parse(raw)
+            if json_ok(d) != 0
+                r = json_root(d)
+                t = json_get_str(d, r, "type")
+                if str_eq(t, "text") != 0
+                    _t = ev_tui_log_add(json_get_str(d, json_get(d, r, "part"), "text"))
+                elsif str_eq(t, "error") != 0
+                    em = json_path(d, r, "error.data.message")
+                    if em >= 0
+                        _e = ev_tui_log_add("error: " + json_str(d, em))
+                elsif str_eq(t, "tool_use") != 0
+                    _u = tui_log_tool(d, r)
+                elsif str_eq(t, "subagent") != 0
+                    inner = json_path(d, r, "part.event")
+                    if inner >= 0
+                        _s = tui_log_tool(d, inner)
+                elsif str_eq(t, "permission_request") != 0
+                    pt = json_get(d, r, "part")
+                    reply = tui_ask_permission(json_get_str(d, pt, "title"))
+                    msg = jb_obj(jb_kv("type", json_quote("permission_reply")) + "," + jb_kv("id", json_quote(json_get_str(d, pt, "id"))) + "," + jb_kv("reply", json_quote(reply)))
+                    _w = child_write_line(h, msg)
+    child_finish(h)
+
 fn tui_loop_go(turn: Int) -> Int ! io, alloc
     if turn <= 0
         _h = tui_draw_home()
@@ -259,14 +338,14 @@ fn tui_loop_go(turn: Int) -> Int ! io, alloc
     elsif str_len(line) <= 0
         tui_loop_go(turn)
     else
-        _u = oc_tui_log_add("U " + line)
+        _u = ev_tui_log_add("U " + line)
         cont = 0
         if turn > 0
             cont = 1
-        _r = run_once(line, 2, 40, "default", cont, "")
+        _r = tui_turn(line, cont)
         tui_loop_go(turn + 1)
 
 fn tui_loop() -> Int ! io, alloc
-    _z = oc_tui_log_reset()
+    _z = ev_tui_log_reset()
     _e = tui_enter()
     tui_loop_go(0)

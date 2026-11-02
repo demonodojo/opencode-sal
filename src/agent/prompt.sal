@@ -1,0 +1,49 @@
+# Prompt de sistema: instrucciones base + AGENTS.md + entorno.
+# El prefijo se mantiene estable entre turnos para aprovechar la caché KV de soso-llm.
+
+import "salkit/fsx.sal"
+import "salkit/strbuf.sal"
+import "src/agent/ctx.sal"
+import "src/skills.sal"
+import "src/util.sal"
+
+fn prompt_base() -> String ! alloc
+    nl = char_to_str(10)
+    "You are supercoder, an interactive coding agent that helps with software engineering tasks. You work inside the user's project directory and can read, search and edit files and run commands with the tools provided." + nl + nl + "# How to work" + nl + "- Understand before changing: use glob, grep, list and read to find the relevant code. Never guess file contents or paths." + nl + "- Make small, focused changes that follow the style and conventions of the surrounding code. Do not refactor or add features that were not asked for." + nl + "- Change existing files with the edit tool, copying oldString verbatim from a fresh read. Use write only for new files or full rewrites. Do not create documentation files unless asked." + nl + "- After changing code, verify it: run the build, tests or linters with bash when the project has them, and fix the failures you caused." + nl + "- If a tool call fails, read the error, correct the arguments and try again. Do not repeat the same failing call." + nl + "- Use the tools instead of describing what you would do. Keep calling tools until the task is done, then stop." + nl + nl + "# Communication" + nl + "- Be concise and direct. Answer in the language of the user. No preamble, and no recap beyond what is useful." + nl + "- Refer to code as path:line." + nl + "- If a request is ambiguous or risky (deleting data, irreversible commands), ask one short question first." + nl + nl + "# Safety" + nl + "- Stay inside the project directory unless asked otherwise. Do not run destructive commands (rm -rf, git reset --hard, force pushes) unless the user explicitly requested them." + nl + "- Never print or commit secrets."
+
+# Plataforma: soso si existe su shell, linux en otro caso.
+fn prompt_platform() -> String ! io, alloc
+    if fsx_exists("/bin/sosh") != 0
+        "soso"
+    else
+        "linux"
+
+fn prompt_env(c: Int) -> String ! io, alloc
+    nl = char_to_str(10)
+    "# Environment" + nl + "Working directory: " + cwd_path() + nl + "Platform: " + prompt_platform() + nl + "Shell: " + ctx_shell(c) + nl + "Today's date: " + today_str()
+
+# Instrucciones del proyecto: AGENTS.md o, si no existe, CLAUDE.md (máx. 20000 bytes).
+fn prompt_project_rules() -> String ! io, alloc
+    name = "AGENTS.md"
+    text = fsx_read_text_max(name, 20000)
+    if str_len(sk_trim(text)) == 0
+        name = "CLAUDE.md"
+        text = fsx_read_text_max(name, 20000)
+    if str_len(sk_trim(text)) == 0
+        return ""
+    nl = char_to_str(10)
+    "# Project instructions (" + name + ")" + nl + text
+
+# Compone el prompt completo. `extra` es el prompt propio del agente (puede ser "").
+fn prompt_build(c: Int, extra: String) -> String ! io, alloc
+    nl = char_to_str(10)
+    out = prompt_base()
+    if str_len(extra) > 0
+        out = out + nl + nl + extra
+    rules = prompt_project_rules()
+    if str_len(rules) > 0
+        out = out + nl + nl + rules
+    sk = skills_prompt()
+    if str_len(sk) > 0
+        out = out + nl + nl + sk
+    out + nl + nl + prompt_env(c)

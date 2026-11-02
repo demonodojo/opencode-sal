@@ -1,0 +1,46 @@
+# Nombres de herramientas: lista, alias y forma canónica.
+
+import "salkit/strbuf.sal"
+
+# Herramientas base, en el orden en que se ofrecen al modelo.
+fn tools_base_names() -> String
+    "read,write,edit,list,glob,grep,bash"
+
+# Nombre canónico (acepta alias frecuentes de otros agentes y mayúsculas).
+fn tool_canon(name: String) -> String ! alloc
+    n = sk_lower(sk_trim(name))
+    if str_eq(n, "read_file") != 0
+        return "read"
+    if str_eq(n, "view") != 0
+        return "read"
+    if str_eq(n, "write_file") != 0
+        return "write"
+    if str_eq(n, "create_file") != 0
+        return "write"
+    if str_eq(n, "replace") != 0
+        return "edit"
+    if str_eq(n, "reemplazar_texto") != 0
+        return "edit"
+    if str_eq(n, "str_replace") != 0
+        return "edit"
+    if str_eq(n, "ls") != 0
+        return "list"
+    if str_eq(n, "find") != 0
+        return "glob"
+    if str_eq(n, "search") != 0
+        return "grep"
+    if str_eq(n, "todo_write") != 0
+        return "todowrite"
+    if str_eq(n, "todo_read") != 0
+        return "todoread"
+    if str_eq(n, "shell") != 0
+        return "bash"
+    if str_eq(n, "run") != 0
+        return "bash"
+    if str_eq(n, "execute") != 0
+        return "bash"
+    n
+
+# Todas las herramientas registradas (las de fases posteriores se añaden aquí).
+fn tools_all_names() -> String ! alloc
+    tools_base_names() + ",todowrite,todoread,skill,task"

@@ -1,0 +1,32 @@
+# Herramienta glob: ficheros cuya ruta casa con un patrón.
+
+import "salkit/fsx.sal"
+import "salkit/glob.sal"
+import "salkit/strbuf.sal"
+import "src/tools/common.sal"
+import "src/util.sal"
+
+fn tool_glob(c: Int, d: Int, a: Int) -> Int ! io, alloc
+    pattern = arg_str(d, a, "pattern,glob,filePattern", "")
+    raw = arg_str(d, a, "path,dir,directory", ".")
+    root = path_abs(raw)
+    if fsx_is_dir(root) == 0
+        return tr_err("Directory not found: " + root)
+    files = fsx_walk(root, default_ignores(), 50000)
+    out = sk_sl_new()
+    total = 0
+    n = sk_sl_len(files)
+    i = 0
+    while i < n
+        rel = sk_sl_get(files, i)
+        if glob_match_name(pattern, rel) != 0
+            total = total + 1
+            if total <= 100
+                x = sk_sl_push(out, root + "/" + rel)
+        i = i + 1
+    if total == 0
+        return tr_ok("No files found", pattern)
+    body = sk_join(out, char_to_str(10))
+    if total > 100
+        body = body + char_to_str(10) + "(Results truncated: showing 100 of " + int_to_str(total) + " files. Use a more specific pattern or path.)"
+    tr_ok(body, pattern)

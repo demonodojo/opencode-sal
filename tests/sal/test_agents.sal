@@ -1,0 +1,43 @@
+import "../../src/agents.sal"
+import "salkit/fsx.sal"
+import "support/assert.sal"
+
+fn main() -> Int ! io, alloc
+    f = 0
+    all = agents_builtin()
+    f = f + ck_int(vec_len(all), 4, 1)
+    f = f + ck_int(agent_index(all, "explore"), 3, 2)
+    f = f + ck_int(agent_index(all, "nope"), 0 - 1, 3)
+    ex = vec_get(all, 3)
+    f = f + ck_int(ag_is_sub(ex), 1, 4)
+    f = f + ck_int(ag_is_primary(ex), 0, 5)
+    f = f + ck_int(ag_is_primary(vec_get(all, 0)), 1, 6)
+    f = f + ck_int(ag_is_sub(vec_get(all, 0)), 0, 7)
+
+    base = "target/agentstest"
+    nl = char_to_str(10)
+    w = fsx_write(base + "/rev.md", "---" + nl + "description: Reviews code" + nl + "mode: subagent" + nl + "model: big-model" + nl + "tools:" + nl + "  write: false" + nl + "  edit: false" + nl + "permission:" + nl + "  bash: deny" + nl + "---" + nl + "You review code." + nl)
+    a = agents_load_file(base + "/rev.md", "rev")
+    f = f + ck_str(ag_name(a), "rev", 10)
+    f = f + ck_str(ag_desc(a), "Reviews code", 11)
+    f = f + ck_str(ag_mode(a), "subagent", 12)
+    f = f + ck_str(ag_model(a), "big-model", 13)
+    f = f + ck_str(ag_allow(a), "read,list,glob,grep,bash,todowrite,todoread,skill,task", 14)
+    f = f + ck_str(ag_perm(a), "{{\"bash\":\"deny\"}}", 15)
+    f = f + ck_str(ag_prompt(a), "You review code.", 16)
+
+    w2 = fsx_write(base + "/cc.md", "---" + nl + "description: Claude style" + nl + "tools: Read, Grep" + nl + "---" + nl + "Body" + nl)
+    b = agents_load_file(base + "/cc.md", "cc")
+    f = f + ck_str(ag_mode(b), "all", 20)
+    f = f + ck_str(ag_allow(b), "read,grep", 21)
+    f = f + ck_str(ag_perm(b), "", 22)
+
+    w3 = fsx_write(base + "/plain.md", "Just a prompt without frontmatter" + nl)
+    p = agents_load_file(base + "/plain.md", "plain")
+    f = f + ck_str(ag_allow(p), "", 30)
+    f = f + ck_contains(ag_prompt(p), "Just a prompt", 31)
+
+    f = f + ck_contains(agents_describe(1), "general (subagent)", 40)
+    f = f + ck_int(sk_contains(agents_describe(1), "build (primary)"), 0, 41)
+    f = f + ck_contains(agents_describe(0), "build (primary)", 42)
+    f

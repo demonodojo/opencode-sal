@@ -1,0 +1,85 @@
+import "../../src/tools/list.sal"
+import "../../src/tools/glob.sal"
+import "../../src/tools/grep.sal"
+import "../../src/tools/bash.sal"
+import "../../src/tools/write.sal"
+import "../../src/tools/common.sal"
+import "../../src/agent/ctx.sal"
+import "salkit/json.sal"
+import "support/assert.sal"
+
+fn jl(args: String) -> Int ! io, alloc
+    d = json_parse(args)
+    tool_list(0, d, json_root(d))
+
+fn jg(args: String) -> Int ! io, alloc
+    d = json_parse(args)
+    tool_glob(0, d, json_root(d))
+
+fn jgr(args: String) -> Int ! io, alloc
+    d = json_parse(args)
+    tool_grep(0, d, json_root(d))
+
+fn jb(c: Int, args: String) -> Int ! io, alloc
+    d = json_parse(args)
+    tool_bash(c, d, json_root(d))
+
+fn jw(p: String, content: String) -> Int ! io, alloc
+    d = json_parse("{{\"filePath\":\"" + p + "\",\"content\":\"" + content + "\"}}")
+    tool_write(0, d, json_root(d))
+
+fn main() -> Int ! io, alloc
+    f = 0
+    base = "target/searchtest"
+    x = jw(base + "/src/a.sal", "fn alpha()\\n    1\\n\\nfn beta()\\n    2\\n")
+    x = jw(base + "/src/deep/b.sal", "fn gamma()\\n    alpha()\\n")
+    x = jw(base + "/src/notes.md", "alpha is first\\nBETA second\\n")
+    x = jw(base + "/node_modules/skip.sal", "fn alpha()\\n")
+
+    l = jl("{{\"path\":\"" + base + "\"}}")
+    f = f + ck_int(tr_failed(l), 0, 1)
+    f = f + ck_contains(tr_output(l), "  a.sal", 2)
+    f = f + ck_contains(tr_output(l), "    b.sal", 3)
+    f = f + ck_int(str_contains(tr_output(l), "node_modules"), 0, 4)
+
+    g = jg("{{\"pattern\":\"**/*.sal\",\"path\":\"" + base + "\"}}")
+    f = f + ck_contains(tr_output(g), "src/a.sal", 5)
+    f = f + ck_contains(tr_output(g), "src/deep/b.sal", 6)
+    f = f + ck_int(str_contains(tr_output(g), "skip.sal"), 0, 7)
+    g2 = jg("{{\"pattern\":\"*.md\",\"path\":\"" + base + "\"}}")
+    f = f + ck_contains(tr_output(g2), "notes.md", 8)
+    g3 = jg("{{\"pattern\":\"*.zzz\",\"path\":\"" + base + "\"}}")
+    f = f + ck_str(tr_output(g3), "No files found", 9)
+
+    r = jgr("{{\"pattern\":\"alpha\",\"path\":\"" + base + "\"}}")
+    f = f + ck_contains(tr_output(r), "Found 3 matches in 3 files", 10)
+    f = f + ck_contains(tr_output(r), "src/a.sal:1: fn alpha()", 11)
+    f = f + ck_int(str_contains(tr_output(r), "skip.sal"), 0, 12)
+    r2 = jgr("{{\"pattern\":\"fn \\\\w+\\\\(\\\\)\",\"path\":\"" + base + "\",\"include\":\"*.sal\"}}")
+    f = f + ck_contains(tr_output(r2), "Found 3 matches", 13)
+    r3 = jgr("{{\"pattern\":\"beta\",\"path\":\"" + base + "\",\"ignoreCase\":true}}")
+    f = f + ck_contains(tr_output(r3), "Found 2 matches", 14)
+    r4 = jgr("{{\"pattern\":\"nomatch_xyz\",\"path\":\"" + base + "\"}}")
+    f = f + ck_str(tr_output(r4), "No matches found", 15)
+    r5 = jgr("{{\"pattern\":\"(unclosed\",\"path\":\"" + base + "\"}}")
+    f = f + ck_int(tr_failed(r5), 1, 16)
+    r6 = jgr("{{\"pattern\":\"alpha\",\"path\":\"" + base + "/src/a.sal\"}}")
+    f = f + ck_contains(tr_output(r6), "Found 1 match in 1 file", 17)
+
+    c = ctx_new()
+    x = ctx_set_shell(c, "/bin/sh")
+    b = jb(c, "{{\"command\":\"echo hi; echo err 1>&2\"}}")
+    f = f + ck_int(tr_failed(b), 0, 20)
+    f = f + ck_str(tr_output(b), "hi\nerr\n", 21)
+    b2 = jb(c, "{{\"command\":\"exit 4\"}}")
+    f = f + ck_contains(tr_output(b2), "[exit code 4]", 22)
+    b3 = jb(c, "{{\"command\":\"sleep 5\",\"timeout\":1000}}")
+    f = f + ck_int(tr_failed(b3), 1, 23)
+    f = f + ck_contains(tr_output(b3), "timed out", 24)
+    b4 = jb(c, "{{\"command\":\"pwd\",\"workdir\":\"/tmp\"}}")
+    f = f + ck_contains(tr_output(b4), "/tmp", 25)
+    b5 = jb(c, "{{\"command\":\"   \"}}")
+    f = f + ck_int(tr_failed(b5), 1, 26)
+    b6 = jb(c, "{{\"command\":\"true\"}}")
+    f = f + ck_str(tr_output(b6), "(no output)", 27)
+    f

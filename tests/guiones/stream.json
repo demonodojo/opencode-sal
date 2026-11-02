@@ -1,0 +1,8 @@
+{
+  "name": "stream",
+  "description": "Lectura con argumentos fragmentados y texto final en tres deltas",
+  "steps": [
+    { "type": "tool_calls", "name": "read", "fragments": true, "arguments": { "filePath": "/tmp/oc-fixture.txt" } },
+    { "type": "content", "deltas": ["ter", "mina", "do"], "usage": { "prompt_tokens": 120, "completion_tokens": 3, "total_tokens": 123 } }
+  ]
+}

@@ -1,0 +1,102 @@
+import "../../src/perm.sal"
+import "../../src/tools/registry.sal"
+import "../../src/tools/todo.sal"
+import "../../src/skills.sal"
+import "salkit/json.sal"
+import "salkit/fsx.sal"
+import "support/assert.sal"
+
+fn mkcfg(text: String) -> Int ! alloc
+    c = vec_new()
+    x = vec_push(c, json_parse(text))
+    x = vec_push(c, str_as_int(text))
+    c
+
+fn run_tool(c: Int, name: String, args: String) -> Int ! io, alloc
+    tool_exec(c, name, args)
+
+fn main() -> Int ! io, alloc
+    f = 0
+    f = f + ck_int(perm_wild("git *", "git status"), 1, 1)
+    f = f + ck_int(perm_wild("git *", "gitx"), 0, 2)
+    f = f + ck_int(perm_wild("*", "a/b/c"), 1, 3)
+    f = f + ck_int(perm_wild("a?c", "abc"), 1, 4)
+    f = f + ck_int(perm_wild("*.sal", "src/x.sal"), 1, 5)
+    f = f + ck_int(perm_wild("*.sal", "src/x.rs"), 0, 6)
+    f = f + ck_int(perm_match("git status *", "git status"), 1, 7)
+    f = f + ck_int(perm_match("git status *", "git status -s"), 1, 8)
+    f = f + ck_int(perm_match("git status *", "git stash"), 0, 9)
+
+    f = f + ck_int(perm_bash_readonly("ls -la"), 1, 10)
+    f = f + ck_int(perm_bash_readonly("git status"), 1, 11)
+    f = f + ck_int(perm_bash_readonly("git push"), 0, 12)
+    f = f + ck_int(perm_bash_readonly("cat a > b"), 0, 13)
+    f = f + ck_int(perm_bash_readonly("ls; rm -rf x"), 0, 14)
+    f = f + ck_int(perm_bash_readonly("echo $(id)"), 0, 15)
+    f = f + ck_int(perm_bash_readonly("make"), 0, 16)
+
+    c = ctx_new()
+    x = ctx_set_cfg(c, mkcfg("{{\"permission\":{{\"edit\":\"ask\",\"bash\":{{\"*\":\"ask\",\"git status*\":\"allow\",\"rm *\":\"deny\"}}}}}}"))
+    x = ctx_set_session(c, "permtest")
+    f = f + ck_int(perm_decide(c, "read", "/x"), 0, 20)
+    f = f + ck_int(perm_decide(c, "edit", "/x"), 1, 21)
+    f = f + ck_int(perm_decide(c, "bash", "git status -s"), 0, 22)
+    f = f + ck_int(perm_decide(c, "bash", "rm -rf /"), 2, 23)
+    f = f + ck_int(perm_decide(c, "bash", "make"), 1, 24)
+    f = f + ck_int(perm_decide(c, "external_directory", "/etc"), 1, 25)
+    x = ctx_set_agent_perm(c, "{{\"bash\":\"deny\"}}")
+    f = f + ck_int(perm_decide(c, "bash", "git status"), 2, 26)
+    x = ctx_set_agent_perm(c, "")
+
+    # sin cliente: ask se rechaza; con yes se concede; deny nunca
+    r = run_tool(c, "bash", "{{\"command\":\"make\"}}")
+    f = f + ck_int(tr_failed(r), 1, 30)
+    f = f + ck_contains(tr_output(r), "no user is available", 31)
+    r2 = run_tool(c, "bash", "{{\"command\":\"rm -rf nada\"}}")
+    f = f + ck_contains(tr_output(r2), "Permission denied", 32)
+    x = ctx_set_yes(c, 1)
+    r3 = run_tool(c, "bash", "{{\"command\":\"echo ok\"}}")
+    f = f + ck_int(tr_failed(r3), 0, 33)
+    r4 = run_tool(c, "bash", "{{\"command\":\"rm -rf nada\"}}")
+    f = f + ck_contains(tr_output(r4), "Permission denied", 34)
+    x = ctx_set_yes(c, 0)
+
+    # rutas fuera del directorio de trabajo piden external_directory
+    r5 = run_tool(c, "read", "{{\"filePath\":\"/etc/hostname\"}}")
+    f = f + ck_contains(tr_output(r5), "external_directory", 35)
+
+    # grants recordados
+    c2 = ctx_new()
+    x = ctx_set_cfg(c2, mkcfg("{{}}"))
+    x = ctx_set_session(c2, "permtest")
+    x = ctx_set_grants(c2, "bash" + char_to_str(9) + "make *" + char_to_str(10))
+    f = f + ck_int(perm_granted(c2, "bash", "make test"), 1, 40)
+    f = f + ck_int(perm_granted(c2, "bash", "make"), 1, 41)
+    f = f + ck_int(perm_granted(c2, "bash", "cargo build"), 0, 42)
+    f = f + ck_int(perm_granted(c2, "edit", "make"), 0, 43)
+    f = f + ck_str(perm_pattern("bash", "git commit -m x"), "git commit *", 44)
+    f = f + ck_str(perm_pattern("bash", "ls -la"), "ls *", 45)
+
+    # todos
+    c3 = ctx_new()
+    x = ctx_set_cfg(c3, mkcfg("{{}}"))
+    x = ctx_set_session(c3, "permtest")
+    t = run_tool(c3, "todowrite", "{{\"todos\":[{{\"content\":\"a\",\"status\":\"in_progress\"}},{{\"content\":\"b\",\"status\":\"completed\",\"priority\":\"low\"}}]}}")
+    f = f + ck_int(tr_failed(t), 0, 50)
+    f = f + ck_str(tr_title(t), "1 todos", 51)
+    f = f + ck_contains(tr_output(t), "\"priority\":\"medium\"", 52)
+    t2 = run_tool(c3, "todoread", "{{}}")
+    f = f + ck_contains(tr_output(t2), "\"content\":\"b\"", 53)
+    t3 = run_tool(c3, "todowrite", "{{\"todos\":[{{\"status\":\"pending\"}}]}}")
+    f = f + ck_int(tr_failed(t3), 1, 54)
+
+    # skills: el repositorio trae .claude/skills/supercoder-sal-agente
+    sk = skills_scan()
+    f = f + ck_int(sk_sl_len(sk) >= 1, 1, 60)
+    f = f + ck_contains(skills_prompt(), "supercoder-sal-agente:", 61)
+    s1 = run_tool(c3, "skill", "{{\"name\":\"supercoder-sal-agente\"}}")
+    f = f + ck_int(tr_failed(s1), 0, 62)
+    f = f + ck_contains(tr_output(s1), "Base directory for this skill", 63)
+    s2 = run_tool(c3, "skill", "{{\"name\":\"nope\"}}")
+    f = f + ck_contains(tr_output(s2), "not found", 64)
+    f

@@ -1,0 +1,138 @@
+# Imágenes: detección por extensión, data URL en base64 y descripción con un modelo de visión.
+#
+# Un modelo con "vision": true recibe las imágenes como partes `image_url`. Un modelo sin visión
+# nunca las recibe (soso-llm las rechaza con 422): si hay "vision_model" en supercoder.json, ese
+# modelo describe la imagen y la descripción sustituye a la imagen; si no, se avisa al agente.
+
+import "salkit/fsx.sal"
+import "salkit/base64.sal"
+import "salkit/json.sal"
+import "salkit/strbuf.sal"
+import "src/agent/ctx.sal"
+import "src/agent/messages.sal"
+import "src/config.sal"
+import "src/provider/openai.sal"
+
+fn img_max_bytes() -> Int
+    5242880
+
+fn img_ext(path: String) -> String ! alloc
+    dot = 0 - 1
+    i = 0
+    n = str_len(path)
+    while i < n
+        ch = str_char(path, i)
+        if ch == 46
+            dot = i
+        if ch == 47
+            dot = 0 - 1
+        i = i + 1
+    if dot < 0
+        return ""
+    sk_lower(str_slice(path, dot + 1, n))
+
+fn img_is_image(path: String) -> Int ! alloc
+    e = img_ext(path)
+    if str_eq(e, "png") != 0
+        return 1
+    if str_eq(e, "jpg") != 0
+        return 1
+    if str_eq(e, "jpeg") != 0
+        return 1
+    if str_eq(e, "gif") != 0
+        return 1
+    if str_eq(e, "webp") != 0
+        return 1
+    0
+
+fn img_mime(path: String) -> String ! alloc
+    e = img_ext(path)
+    if str_eq(e, "jpg") != 0
+        return "image/jpeg"
+    if str_eq(e, "jpeg") != 0
+        return "image/jpeg"
+    if str_eq(e, "gif") != 0
+        return "image/gif"
+    if str_eq(e, "webp") != 0
+        return "image/webp"
+    "image/png"
+
+# data:<mime>;base64,<datos>, o "" si el fichero no existe o es demasiado grande.
+fn img_data_url(path: String) -> String ! io, alloc
+    sz = fsx_size(path)
+    if sz <= 0
+        return ""
+    if sz > img_max_bytes()
+        return ""
+    "data:" + img_mime(path) + ";base64," + b64_encode(fsx_read_bytes(path))
+
+fn img_text_part(text: String) -> String ! alloc
+    jb_obj(jb_kv("type", json_quote("text")) + "," + jb_kv("text", json_quote(text)))
+
+fn img_url_part(url: String) -> String ! alloc
+    jb_obj(jb_kv("type", json_quote("image_url")) + "," + jb_kv("image_url", jb_obj(jb_kv("url", json_quote(url)))))
+
+# Mensaje de usuario con texto e imágenes (`urls` es una lista de data URL).
+fn img_user_message(text: String, urls: Int) -> String ! alloc
+    parts = sk_sl_new()
+    x = sk_sl_push(parts, img_text_part(text))
+    i = 0
+    while i < sk_sl_len(urls)
+        x = sk_sl_push(parts, img_url_part(sk_sl_get(urls, i)))
+        i = i + 1
+    msg_user_parts(jb_arr(jb_join(parts)))
+
+fn img_unavailable(path: String, why: String) -> String ! alloc
+    "[Image " + path + " is not available: " + why + "]"
+
+# Descripción de la imagen con "vision_model". Siempre devuelve texto (un aviso si falla).
+fn vision_describe(c: Int, path: String, question: String) -> String ! io, alloc
+    cfg = ctx_cfg(c)
+    vm = cfg_top_str(cfg, "vision_model")
+    if str_len(vm) == 0
+        return img_unavailable(path, "the current model cannot view images and no \"vision_model\" is configured in supercoder.json")
+    url = img_data_url(path)
+    if str_len(url) == 0
+        return img_unavailable(path, "the file is missing, empty or larger than 5 MB")
+    saved_model = ctx_model(c)
+    saved_msgs = ctx_msgs(c)
+    saved_sys = ctx_system(c)
+    saved_tools = ctx_tools(c)
+    work = sk_sl_new()
+    q = "Describe this image for a software engineer. Transcribe any visible text exactly and describe UI elements, diagrams, code and error messages."
+    if str_len(question) > 0
+        q = q + " Context from the user: " + question
+    urls = sk_sl_new()
+    x = sk_sl_push(urls, url)
+    x = sk_sl_push(work, img_user_message(q, urls))
+    x = ctx_set_model(c, vm)
+    x = ctx_set_msgs(c, work)
+    x = ctx_set_system(c, "")
+    x = ctx_set_tools(c, "[]")
+    r = oai_chat_plain(c)
+    x = ctx_set_model(c, saved_model)
+    x = ctx_set_msgs(c, saved_msgs)
+    x = ctx_set_system(c, saved_sys)
+    x = ctx_set_tools(c, saved_tools)
+    if pr_ok(r) == 0
+        return img_unavailable(path, "the vision model failed: " + pr_error(r))
+    x = ctx_add_tokens(c, pr_in(r), pr_out(r))
+    "[Image " + path + " described by the vision model]" + char_to_str(10) + sk_trim(pr_text(r))
+
+# Añade al historial las imágenes que `read` dejó pendientes (modelo con visión).
+fn vision_flush_pending(c: Int) -> Int ! io, alloc
+    pend = ctx_pending(c)
+    if str_len(pend) == 0
+        return 0
+    x = ctx_set_pending(c, "")
+    paths = sk_split_lines(pend)
+    i = 0
+    while i < sk_sl_len(paths)
+        p = sk_sl_get(paths, i)
+        url = img_data_url(p)
+        if str_len(url) > 0
+            urls = sk_sl_new()
+            y = sk_sl_push(urls, url)
+            z = sk_sl_push(ctx_msgs(c), img_user_message("Image returned by the read tool: " + p, urls))
+        i = i + 1
+    0

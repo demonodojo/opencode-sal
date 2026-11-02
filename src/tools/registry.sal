@@ -1,0 +1,197 @@
+# Registro de herramientas: esquemas para el modelo, validación de argumentos y despacho.
+
+import "salkit/json.sal"
+import "salkit/strbuf.sal"
+import "src/tools/common.sal"
+import "src/tools/names.sal"
+import "src/tools/read.sal"
+import "src/tools/write.sal"
+import "src/tools/edit.sal"
+import "src/tools/list.sal"
+import "src/tools/glob.sal"
+import "src/tools/grep.sal"
+import "src/tools/bash.sal"
+import "src/tools/todo.sal"
+import "src/tools/task.sal"
+import "src/agents.sal"
+import "src/skills.sal"
+import "src/perm.sal"
+import "src/agent/ctx.sal"
+
+fn tool_known(canon: String) -> Int ! alloc
+    if sk_sl_contains(sk_split_char(tools_all_names(), 44), canon) != 0
+        1
+    else
+        0
+
+# 1 si el agente puede usar la herramienta (`allow` vacío = todas).
+fn tool_allowed(allow: String, canon: String) -> Int ! alloc
+    if str_len(allow) == 0
+        return 1
+    if sk_sl_contains(sk_split_char(allow, 44), canon) != 0
+        return 1
+    0
+
+# Grupos de alias de los parámetros obligatorios: "a,b;c,d" (grupos separados por ";").
+fn tool_required(canon: String) -> String
+    if str_eq(canon, "read") != 0
+        return "filePath,file_path,path,file"
+    if str_eq(canon, "write") != 0
+        return "filePath,file_path,path,file;content,text,contents"
+    if str_eq(canon, "edit") != 0
+        return "filePath,file_path,path,file;oldString,old_string,oldText,old_text,buscar;newString,new_string,newText,new_text,nuevo"
+    if str_eq(canon, "glob") != 0
+        return "pattern,glob,filePattern"
+    if str_eq(canon, "grep") != 0
+        return "pattern,regex,query"
+    if str_eq(canon, "bash") != 0
+        return "command,cmd,script"
+    if str_eq(canon, "todowrite") != 0
+        return "todos"
+    if str_eq(canon, "skill") != 0
+        return "name"
+    if str_eq(canon, "task") != 0
+        return "prompt"
+    ""
+
+# ---------------------------------------------------------------- esquemas
+
+fn tprop(name: String, type: String, desc: String) -> String ! alloc
+    jb_kv(name, jb_obj(jb_kv("type", json_quote(type)) + "," + jb_kv("description", json_quote(desc))))
+
+fn tdef(name: String, desc: String, props: String, required: String) -> String ! alloc
+    req = sk_sl_new()
+    if str_len(required) > 0
+        parts = sk_split_char(required, 44)
+        i = 0
+        while i < sk_sl_len(parts)
+            x = sk_sl_push(req, json_quote(sk_sl_get(parts, i)))
+            i = i + 1
+    params = jb_obj(jb_kv("type", json_quote("object")) + "," + jb_kv("properties", jb_obj(props)) + "," + jb_kv("required", jb_arr(jb_join(req))))
+    fn_part = jb_obj(jb_kv("name", json_quote(name)) + "," + jb_kv("description", json_quote(desc)) + "," + jb_kv("parameters", params))
+    jb_obj(jb_kv("type", json_quote("function")) + "," + jb_kv("function", fn_part))
+
+fn tdef_for(canon: String) -> String ! io, alloc
+    if str_eq(canon, "read") != 0
+        return tdef("read", "Read a file from the local filesystem, or list a directory. Returns the lines prefixed with line numbers. Reads up to 2000 lines by default; use offset (1-based line number) and limit to page through large files. Always read a file before editing it.", tprop("filePath", "string", "Absolute path, or path relative to the project directory") + "," + tprop("offset", "integer", "Line number to start reading from (1-based)") + "," + tprop("limit", "integer", "Maximum number of lines to read"), "filePath")
+    if str_eq(canon, "write") != 0
+        return tdef("write", "Create a new file or completely overwrite an existing one with the given content. Parent directories are created automatically. To change part of an existing file use edit instead.", tprop("filePath", "string", "Path of the file to write") + "," + tprop("content", "string", "The full content of the file"), "filePath,content")
+    if str_eq(canon, "edit") != 0
+        return tdef("edit", "Replace exact text in an existing file. oldString must match the file contents exactly, including whitespace and indentation, and must be unique in the file; otherwise the edit fails. Include enough surrounding lines to make it unique, or set replaceAll to replace every occurrence. Read the file first and copy the text verbatim.", tprop("filePath", "string", "Path of the file to modify") + "," + tprop("oldString", "string", "The exact text to replace") + "," + tprop("newString", "string", "The text to replace it with (must differ from oldString)") + "," + tprop("replaceAll", "boolean", "Replace every occurrence of oldString (default false)"), "filePath,oldString,newString")
+    if str_eq(canon, "list") != 0
+        return tdef("list", "List files and directories as a tree (3 levels deep; .git, node_modules, target and similar are skipped). Use it to get oriented; use glob or grep to search.", tprop("path", "string", "Directory to list (default: the project directory)"), "")
+    if str_eq(canon, "glob") != 0
+        return tdef("glob", "Find files whose path matches a glob pattern such as '**/*.sal' or 'src/**/*.ts'. A pattern without '/' is matched against file names at any depth. Returns absolute paths.", tprop("pattern", "string", "The glob pattern to match") + "," + tprop("path", "string", "Directory to search (default: the project directory)"), "pattern")
+    if str_eq(canon, "grep") != 0
+        return tdef("grep", "Search file contents with a regular expression (for example 'fn \\w+' or 'TODO|FIXME'). Returns file:line: text for each match. Use include to restrict the files searched (for example '*.sal'). Binary files and build directories are skipped.", tprop("pattern", "string", "Regular expression to search for") + "," + tprop("path", "string", "File or directory to search (default: the project directory)") + "," + tprop("include", "string", "Glob of file names to include, e.g. '*.ts'") + "," + tprop("ignoreCase", "boolean", "Case-insensitive search (default false)"), "pattern")
+    if str_eq(canon, "bash") != 0
+        return tdef("bash", "Run a shell command in the project directory and return its combined stdout and stderr plus the exit code. Use it for builds, tests, git and other command-line tools. Commands run non-interactively with no stdin, so do not start interactive programs or long-running servers. Default timeout is 120000 ms.", tprop("command", "string", "The command to run") + "," + tprop("description", "string", "Short description of what the command does") + "," + tprop("timeout", "integer", "Timeout in milliseconds (max 600000)") + "," + tprop("workdir", "string", "Directory to run the command in (default: the project directory)"), "command")
+    if str_eq(canon, "todowrite") != 0
+        return tdef("todowrite", "Create and update the task list for the current work. Use it for tasks with three or more steps: write the plan first, mark exactly one item in_progress while working on it and mark it completed as soon as it is done. Send the complete list every time.", todo_items_prop(), "todos")
+    if str_eq(canon, "todoread") != 0
+        return tdef("todoread", "Read the current task list.", "", "")
+    if str_eq(canon, "task") != 0
+        return tdef("task", "Launch a subagent to handle a complex, self-contained task autonomously (searching a large codebase, researching a question, a multi-step change). The subagent works in its own context and returns only its final report, so describe the task completely in the prompt: it cannot see this conversation. Available subagents:" + char_to_str(10) + agents_describe(1), tprop("description", "string", "Short (3-5 words) description of the task") + "," + tprop("prompt", "string", "The full task for the subagent, with all the context it needs") + "," + tprop("subagent_type", "string", "Name of the subagent to use"), "description,prompt,subagent_type")
+    if str_eq(canon, "skill") != 0
+        return tdef("skill", "Load a skill: specialized instructions for a kind of task. The available skills and when to use them are listed in the system prompt.", tprop("name", "string", "Name of the skill to load"), "name")
+    ""
+
+# Esquema del parámetro `todos` (array de objetos).
+fn todo_items_prop() -> String ! alloc
+    item_props = tprop("content", "string", "Brief description of the task") + "," + tprop("status", "string", "pending, in_progress, completed or cancelled") + "," + tprop("priority", "string", "high, medium or low")
+    item = jb_obj(jb_kv("type", json_quote("object")) + "," + jb_kv("properties", jb_obj(item_props)) + "," + jb_kv("required", jb_arr(json_quote("content") + "," + json_quote("status"))))
+    jb_kv("todos", jb_obj(jb_kv("type", json_quote("array")) + "," + jb_kv("description", json_quote("The complete updated task list")) + "," + jb_kv("items", item)))
+
+# Array JSON con las definiciones de las herramientas permitidas (`allow` vacío = todas).
+fn tools_defs(allow: String) -> String ! io, alloc
+    tools_defs_depth(allow, 0)
+
+# Como tools_defs; los subagentes (depth >= 1) no reciben `task`.
+fn tools_defs_depth(allow: String, depth: Int) -> String ! io, alloc
+    names = sk_split_char(tools_all_names(), 44)
+    out = sk_sl_new()
+    i = 0
+    n = sk_sl_len(names)
+    while i < n
+        nm = sk_sl_get(names, i)
+        offer = tool_allowed(allow, nm)
+        if str_eq(nm, "skill") != 0
+            if sk_sl_len(skills_scan()) == 0
+                offer = 0
+        if str_eq(nm, "task") != 0
+            if depth >= 1
+                offer = 0
+        if offer != 0
+            def = tdef_for(nm)
+            if str_len(def) > 0
+                x = sk_sl_push(out, def)
+        i = i + 1
+    jb_arr(jb_join(out))
+
+# ---------------------------------------------------------------- ejecución
+
+# Objeto JSON de argumentos tal como se mostrará en los eventos ("{}" si no es válido).
+fn tool_input_json(args: String) -> String ! alloc
+    d = json_parse(args)
+    if json_ok(d) != 0
+        if json_is_object(d, json_root(d)) != 0
+            return json_dump(d, json_root(d))
+    jb_obj("")
+
+# Primer parámetro obligatorio que falta, o "".
+fn tool_missing(d: Int, a: Int, canon: String) -> String ! alloc
+    groups = sk_split_char(tool_required(canon), 59)
+    i = 0
+    n = sk_sl_len(groups)
+    while i < n
+        g = sk_sl_get(groups, i)
+        if str_len(g) > 0
+            if arg_has(d, a, g) == 0
+                return str_slice(g, 0, sk_index_of(g, ","))
+        i = i + 1
+    ""
+
+fn tool_exec(c: Int, name: String, args_text: String) -> Int ! io, alloc
+    canon = tool_canon(name)
+    if tool_known(canon) == 0
+        return tr_err("Unknown tool '" + name + "'. Available tools: " + tools_all_names())
+    if tool_allowed(ctx_allow(c), canon) == 0
+        return tr_err("Tool '" + canon + "' is not available to this agent")
+    src = str_slice(args_text, 0, str_len(args_text))
+    if str_len(sk_trim(args_text)) == 0
+        src = "{{}}"
+    d = json_parse(src)
+    if json_ok(d) == 0
+        return tr_err("Arguments are not valid JSON (" + json_error(d) + "). Send a single JSON object with the documented parameters.")
+    a = json_root(d)
+    if json_is_object(d, a) == 0
+        return tr_err("Arguments must be a JSON object")
+    miss = tool_missing(d, a, canon)
+    if str_len(miss) > 0
+        return tr_err("Missing required parameter '" + miss + "' for tool '" + canon + "'")
+    denied = perm_check(c, canon, d, a)
+    if str_len(denied) > 0
+        return tr_err(denied)
+    if str_eq(canon, "read") != 0
+        return tool_read(c, d, a)
+    if str_eq(canon, "write") != 0
+        return tool_write(c, d, a)
+    if str_eq(canon, "edit") != 0
+        return tool_edit(c, d, a)
+    if str_eq(canon, "list") != 0
+        return tool_list(c, d, a)
+    if str_eq(canon, "glob") != 0
+        return tool_glob(c, d, a)
+    if str_eq(canon, "grep") != 0
+        return tool_grep(c, d, a)
+    if str_eq(canon, "bash") != 0
+        return tool_bash(c, d, a)
+    if str_eq(canon, "todowrite") != 0
+        return tool_todowrite(c, d, a)
+    if str_eq(canon, "todoread") != 0
+        return tool_todoread(c, d, a)
+    if str_eq(canon, "skill") != 0
+        return tool_skill(c, d, a)
+    if str_eq(canon, "task") != 0
+        return tool_task(c, d, a)
+    tr_err("Tool '" + canon + "' is not implemented")

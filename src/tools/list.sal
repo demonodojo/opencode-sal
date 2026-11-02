@@ -1,0 +1,48 @@
+# Herramienta list: árbol de un directorio (profundidad y tamaño acotados).
+
+import "salkit/fsx.sal"
+import "salkit/strbuf.sal"
+import "src/tools/common.sal"
+import "src/util.sal"
+
+# Añade a `out` las entradas de `dir` con sangría; `budget` es un vec [restantes].
+fn list_into(out: Int, dir: String, ign: Int, depth: Int, maxdepth: Int, budget: Int) -> Int ! io, alloc
+    names = fsx_list_dir(dir)
+    n = sk_sl_len(names)
+    i = 0
+    while i < n
+        if vec_get(budget, 0) > 0
+            name = sk_sl_get(names, i)
+            isdir = sk_ends_with(name, "/")
+            base = name
+            if isdir != 0
+                base = str_slice(name, 0, str_len(name) - 1)
+            if sk_sl_contains(ign, base) == 0
+                pad = ""
+                k = 0
+                while k < depth
+                    pad = pad + "  "
+                    k = k + 1
+                x = sk_sl_push(out, pad + name)
+                x = vec_set(budget, 0, vec_get(budget, 0) - 1)
+                if isdir != 0
+                    if depth + 1 < maxdepth
+                        x = list_into(out, dir + "/" + base, ign, depth + 1, maxdepth, budget)
+        i = i + 1
+    0
+
+fn tool_list(c: Int, d: Int, a: Int) -> Int ! io, alloc
+    raw = arg_str(d, a, "path,dir,directory,filePath", ".")
+    path = path_abs(raw)
+    if fsx_exists(path) == 0
+        return tr_err("Directory not found: " + path)
+    if fsx_is_dir(path) == 0
+        return tr_err(path + " is not a directory")
+    out = sk_sl_new()
+    budget = vec_new()
+    x = vec_push(budget, 200)
+    x = list_into(out, path, default_ignores(), 0, 3, budget)
+    body = path + "/" + char_to_str(10) + sk_join(out, char_to_str(10))
+    if vec_get(budget, 0) <= 0
+        body = body + char_to_str(10) + "(listing truncated at 200 entries)"
+    tr_ok(body, path_rel(cwd_path(), path))

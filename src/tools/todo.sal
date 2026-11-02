@@ -1,0 +1,90 @@
+# Herramientas todowrite / todoread: lista de tareas del agente, guardada en la sesión.
+
+import "salkit/json.sal"
+import "salkit/strbuf.sal"
+import "salkit/fsx.sal"
+import "src/agent/ctx.sal"
+import "src/events.sal"
+import "src/session.sal"
+import "src/tools/common.sal"
+
+fn todo_status_ok(s: String) -> Int ! alloc
+    if str_eq(s, "pending") != 0
+        return 1
+    if str_eq(s, "in_progress") != 0
+        return 1
+    if str_eq(s, "completed") != 0
+        return 1
+    if str_eq(s, "cancelled") != 0
+        return 1
+    0
+
+fn todo_priority_ok(s: String) -> Int ! alloc
+    if str_eq(s, "high") != 0
+        return 1
+    if str_eq(s, "medium") != 0
+        return 1
+    if str_eq(s, "low") != 0
+        return 1
+    0
+
+# Carga las tareas guardadas de la sesión en el contexto.
+fn todos_load(c: Int) -> Int ! io, alloc
+    raw = sk_trim(fsx_read_text(session_file(ctx_session(c), "todos.json")))
+    if str_len(raw) == 0
+        return ctx_set_todos(c, "[]")
+    d = json_parse(raw)
+    if json_ok(d) == 0
+        return ctx_set_todos(c, "[]")
+    ctx_set_todos(c, raw)
+
+fn todos_text(c: Int) -> String ! alloc
+    t = ctx_todos(c)
+    if str_len(t) == 0
+        return "[]"
+    t
+
+fn tool_todoread(c: Int, d: Int, a: Int) -> Int ! io, alloc
+    t = todos_text(c)
+    td = json_parse(t)
+    open = 0
+    if json_ok(td) != 0
+        n = json_first(td, json_root(td))
+        while n >= 0
+            if str_eq(json_get_str(td, n, "status"), "completed") == 0
+                if str_eq(json_get_str(td, n, "status"), "cancelled") == 0
+                    open = open + 1
+            n = json_next(td, n)
+    tr_ok(t, int_to_str(open) + " todos")
+
+fn tool_todowrite(c: Int, d: Int, a: Int) -> Int ! io, alloc
+    node = arg_node(d, a, "todos")
+    if node < 0
+        return tr_err("Missing required parameter 'todos'")
+    if json_is_array(d, node) == 0
+        return tr_err("'todos' must be an array of objects with content, status and priority")
+    items = sk_sl_new()
+    open = 0
+    k = 0
+    n = json_first(d, node)
+    while n >= 0
+        k = k + 1
+        content = sk_trim(json_get_str(d, n, "content"))
+        if str_len(content) == 0
+            return tr_err("Todo " + int_to_str(k) + " has no content")
+        status = sk_lower(sk_trim(json_get_str(d, n, "status")))
+        if todo_status_ok(status) == 0
+            status = "pending"
+        prio = sk_lower(sk_trim(json_get_str(d, n, "priority")))
+        if todo_priority_ok(prio) == 0
+            prio = "medium"
+        if str_eq(status, "completed") == 0
+            if str_eq(status, "cancelled") == 0
+                open = open + 1
+        x = sk_sl_push(items, jb_obj(jb_kv("content", json_quote(content)) + "," + jb_kv("status", json_quote(status)) + "," + jb_kv("priority", json_quote(prio))))
+        n = json_next(d, n)
+    text = jb_arr(jb_join(items))
+    x = ctx_set_todos(c, text)
+    w = fsx_write(session_file(ctx_session(c), "todos.json"), text)
+    y = ev_todo(c, text)
+    tr_ok(text, int_to_str(open) + " todos")

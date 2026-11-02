@@ -1,0 +1,19 @@
+# Herramienta write: crea o sobrescribe un fichero.
+
+import "salkit/fsx.sal"
+import "src/tools/common.sal"
+import "src/util.sal"
+
+fn tool_write(c: Int, d: Int, a: Int) -> Int ! io, alloc
+    raw = arg_str(d, a, "filePath,file_path,path,file", "")
+    path = path_abs(raw)
+    content = arg_str(d, a, "content,text,contents", "")
+    if fsx_is_dir(path) != 0
+        return tr_err("Cannot write: " + path + " is a directory")
+    existed = fsx_exists(path)
+    if fsx_write(path, content) != 0
+        return tr_err("Could not write " + path)
+    verb = "Created"
+    if existed != 0
+        verb = "Overwrote"
+    tr_ok(verb + " " + path + " (" + int_to_str(str_len(content)) + " bytes)", path_rel(cwd_path(), path))

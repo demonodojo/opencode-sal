@@ -1,0 +1,256 @@
+# Proveedor HTTP compatible con OpenAI (soso-llm, llama.cpp...): POST /v1/chat/completions.
+#
+# La respuesta analizada es un vec: 0 ok, 1 texto, 2 llamadas (vec de calls), 3 tokens de
+# entrada, 4 tokens de salida, 5 finish_reason, 6 mensaje de error, 7 código HTTP.
+
+import "salkit/json.sal"
+import "salkit/http.sal"
+import "salkit/strbuf.sal"
+import "src/agent/ctx.sal"
+import "src/agent/messages.sal"
+import "src/config.sal"
+import "src/events.sal"
+
+fn pr_ok(r: Int) -> Int
+    vec_get(r, 0)
+
+fn pr_text(r: Int) -> String
+    str_from_int(vec_get(r, 1))
+
+fn pr_calls(r: Int) -> Int
+    vec_get(r, 2)
+
+fn pr_in(r: Int) -> Int
+    vec_get(r, 3)
+
+fn pr_out(r: Int) -> Int
+    vec_get(r, 4)
+
+fn pr_finish(r: Int) -> String
+    str_from_int(vec_get(r, 5))
+
+fn pr_error(r: Int) -> String
+    str_from_int(vec_get(r, 6))
+
+fn pr_status(r: Int) -> Int
+    vec_get(r, 7)
+
+fn pr_new(ok: Int, text: String, calls: Int, inp: Int, out: Int, finish: String, err: String, status: Int) -> Int ! alloc
+    r = vec_new()
+    x = vec_push(r, ok)
+    x = vec_push(r, str_as_int(text))
+    x = vec_push(r, calls)
+    x = vec_push(r, inp)
+    x = vec_push(r, out)
+    x = vec_push(r, str_as_int(finish))
+    x = vec_push(r, str_as_int(err))
+    x = vec_push(r, status)
+    r
+
+fn pr_fail(msg: String, status: Int) -> Int ! alloc
+    pr_new(0, "", vec_new(), 0, 0, "error", msg, status)
+
+# Cuerpo de la petición: sistema + historial + herramientas.
+fn oai_body(c: Int, msgs: Int) -> String ! alloc
+    oai_body_mode(c, msgs, 0)
+
+fn oai_body_mode(c: Int, msgs: Int, stream: Int) -> String ! alloc
+    model = ctx_model(c)
+    items = sk_sl_new()
+    if str_len(ctx_system(c)) > 0
+        x = sk_sl_push(items, msg_system(ctx_system(c)))
+    n = sk_sl_len(msgs)
+    i = 0
+    while i < n
+        x = sk_sl_push(items, sk_sl_get(msgs, i))
+        i = i + 1
+    body = jb_kv("model", json_quote(model)) + "," + jb_kv("stream", bool_text(stream)) + "," + jb_kv("max_tokens", int_to_str(cfg_max_tokens(ctx_cfg(c), model))) + "," + jb_kv("messages", jb_arr(jb_join(items)))
+    if stream != 0
+        body = body + "," + jb_kv("stream_options", jb_obj(jb_kv("include_usage", "true")))
+    if str_len(ctx_tools(c)) > 2
+        body = body + "," + jb_kv("tools", ctx_tools(c)) + "," + jb_kv("tool_choice", json_quote("auto"))
+    jb_obj(body)
+
+fn bool_text(v: Int) -> String
+    if v != 0
+        "true"
+    else
+        "false"
+
+# Texto de una respuesta de error (error.message, o el principio del cuerpo).
+fn oai_error_text(body: String) -> String ! alloc
+    d = json_parse(body)
+    if json_ok(d) != 0
+        r = json_root(d)
+        m = json_path(d, r, "error.message")
+        if m >= 0
+            return json_str(d, m)
+        m2 = json_get(d, r, "message")
+        if m2 >= 0
+            return json_str(d, m2)
+    sk_truncate_middle(sk_trim(body), 500)
+
+fn oai_parse_calls(d: Int, tcs: Int) -> Int ! alloc
+    calls = vec_new()
+    n = json_first(d, tcs)
+    k = 0
+    while n >= 0
+        k = k + 1
+        fnode = json_get(d, n, "function")
+        name = json_get_str(d, fnode, "name")
+        an = json_get(d, fnode, "arguments")
+        args = "{{}}"
+        if an >= 0
+            if json_is_string(d, an) != 0
+                args = json_str(d, an)
+            else
+                args = json_dump(d, an)
+        id = json_get_str(d, n, "id")
+        if str_len(id) == 0
+            id = "call_" + int_to_str(k)
+        x = vec_push(calls, call_new(id, name, args))
+        n = json_next(d, n)
+    calls
+
+fn oai_parse(status: Int, body: String) -> Int ! alloc
+    if status != 200
+        return pr_fail(oai_error_text(body), status)
+    d = json_parse(body)
+    if json_ok(d) == 0
+        return pr_fail("invalid JSON from model server: " + sk_truncate_middle(body, 300), status)
+    root = json_root(d)
+    msg = json_path(d, root, "choices.0.message")
+    if msg < 0
+        return pr_fail("response without choices[0].message", status)
+    text = ""
+    cn = json_get(d, msg, "content")
+    if cn >= 0
+        if json_is_string(d, cn) != 0
+            text = json_str(d, cn)
+    calls = vec_new()
+    tcs = json_get(d, msg, "tool_calls")
+    if tcs >= 0
+        calls = oai_parse_calls(d, tcs)
+    finish = json_str(d, json_path(d, root, "choices.0.finish_reason"))
+    inp = json_int(d, json_path(d, root, "usage.prompt_tokens"))
+    out = json_int(d, json_path(d, root, "usage.completion_tokens"))
+    pr_new(1, text, calls, inp, out, finish, "", status)
+
+# Una petición sin streaming (también para llamadas auxiliares como resúmenes y descripciones).
+fn oai_chat_plain(c: Int) -> Int ! io, alloc
+    model = ctx_model(c)
+    cfg = ctx_cfg(c)
+    body = oai_body(c, ctx_msgs(c))
+    r = http_post_json(cfg_host(cfg, model), cfg_port(cfg, model), "/v1/chat/completions", cfg_token(cfg, model), body, cfg_timeout_ms(cfg, model))
+    if http_status(r) == 0
+        return pr_fail(http_error(r), 0)
+    oai_parse(http_status(r), http_body(r))
+
+# Asegura que las listas por índice llegan hasta `idx`.
+fn oai_grow(ids: Int, names: Int, frags: Int, idx: Int) -> Int ! alloc
+    while vec_len(ids) <= idx
+        x = sk_sl_push(ids, "")
+        y = sk_sl_push(names, "")
+        z = vec_push(frags, sk_sl_new())
+    0
+
+# Petición con streaming: acumula el texto y las llamadas por índice y emite text_delta.
+fn oai_chat_stream(c: Int) -> Int ! io, alloc
+    model = ctx_model(c)
+    cfg = ctx_cfg(c)
+    body = oai_body_mode(c, ctx_msgs(c), 1)
+    h = hs_open(cfg_host(cfg, model), cfg_port(cfg, model), "/v1/chat/completions", cfg_token(cfg, model), body, cfg_timeout_ms(cfg, model))
+    if hs_status(h) == 0
+        return pr_fail(hs_error(h), 0)
+    if hs_status(h) != 200
+        rest = hs_read_rest(h)
+        x = hs_close(h)
+        return oai_parse(hs_status(h), rest)
+    parts = sk_sl_new()
+    ids = sk_sl_new()
+    names = sk_sl_new()
+    frags = vec_new()
+    finish = ""
+    inp = 0
+    out = 0
+    go = 1
+    while go != 0
+        line = hs_next_line(h)
+        if str_eq(line, char_to_str(4)) != 0
+            go = 0
+        elsif sk_starts_with(line, "data:") != 0
+            payload = sk_trim(str_slice(line, 5, str_len(line)))
+            if str_eq(payload, "[DONE]") != 0
+                go = 0
+            else
+                d = json_parse(payload)
+                if json_ok(d) != 0
+                    r = json_root(d)
+                    delta = json_path(d, r, "choices.0.delta")
+                    if delta >= 0
+                        cn = json_get(d, delta, "content")
+                        if cn >= 0
+                            if json_is_string(d, cn) != 0
+                                piece = json_str(d, cn)
+                                if str_len(piece) > 0
+                                    x = sk_sl_push(parts, piece)
+                                    y = ev_text_delta(c, piece)
+                        tcs = json_get(d, delta, "tool_calls")
+                        if tcs >= 0
+                            k = 0
+                            tc = json_first(d, tcs)
+                            while tc >= 0
+                                idx = k
+                                in_node = json_get(d, tc, "index")
+                                if in_node >= 0
+                                    idx = json_int(d, in_node)
+                                z = oai_grow(ids, names, frags, idx)
+                                tid = json_get_str(d, tc, "id")
+                                if str_len(tid) > 0
+                                    w = vec_set(ids, idx, str_as_int(tid))
+                                fnode = json_get(d, tc, "function")
+                                if fnode >= 0
+                                    fname = json_get_str(d, fnode, "name")
+                                    if str_len(fname) > 0
+                                        w2 = vec_set(names, idx, str_as_int(fname))
+                                    af = json_get(d, fnode, "arguments")
+                                    if af >= 0
+                                        if json_is_string(d, af) != 0
+                                            w3 = sk_sl_push(vec_get(frags, idx), json_str(d, af))
+                                k = k + 1
+                                tc = json_next(d, tc)
+                    fr = json_path(d, r, "choices.0.finish_reason")
+                    if fr >= 0
+                        if json_is_string(d, fr) != 0
+                            finish = json_str(d, fr)
+                    un = json_get(d, r, "usage")
+                    if un >= 0
+                        inp = json_get_int(d, un, "prompt_tokens")
+                        out = json_get_int(d, un, "completion_tokens")
+    err = hs_error(h)
+    x = hs_close(h)
+    text = sk_join(parts, "")
+    calls = vec_new()
+    i = 0
+    while i < vec_len(ids)
+        nm = sk_sl_get(names, i)
+        if str_len(nm) > 0
+            args = sk_join(vec_get(frags, i), "")
+            if str_len(sk_trim(args)) == 0
+                args = "{{}}"
+            id = sk_sl_get(ids, i)
+            if str_len(id) == 0
+                id = "call_" + int_to_str(i + 1)
+            y = vec_push(calls, call_new(id, nm, args))
+        i = i + 1
+    if str_len(text) == 0
+        if vec_len(calls) == 0
+            if str_len(err) > 0
+                return pr_fail(err, 200)
+    pr_new(1, text, calls, inp, out, finish, "", 200)
+
+# Una petición al modelo con el historial actual del contexto (streaming si el modelo lo pide).
+fn oai_chat(c: Int) -> Int ! io, alloc
+    if cfg_stream(ctx_cfg(c), ctx_model(c)) != 0
+        return oai_chat_stream(c)
+    oai_chat_plain(c)

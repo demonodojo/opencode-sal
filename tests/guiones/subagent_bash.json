@@ -1,0 +1,10 @@
+{
+  "name": "subagent_bash",
+  "description": "El subagente general ejecuta un bash que pide permiso; el padre lo reenvía al cliente",
+  "steps": [
+    { "type": "tool_calls", "name": "task", "arguments": { "description": "Tocar fichero", "prompt": "Ejecuta touch", "subagent_type": "general" } },
+    { "type": "tool_calls", "name": "bash", "arguments": { "command": "touch /tmp/oc-perm-1" } },
+    { "type": "content", "text": "hecho por el hijo" },
+    { "type": "content", "text": "padre listo" }
+  ]
+}

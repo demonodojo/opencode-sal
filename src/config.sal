@@ -1,154 +1,168 @@
-import "io/fs.sal"
-import "skills.sal"
-import "strutil.sal"
-import "claude.sal"
+# Configuración: supercoder.json (en el directorio de trabajo).
+#
+# {
+#   "model": "soso-coder",
+#   "shell": "/bin/sh",
+#   "models": {
+#     "soso-coder": { "host": "127.0.0.1", "port": 7422, "token_env": "SOSO_LLM_API_KEY",
+#                     "max_tokens": 4096, "vision": false, "context_chars": 60000 },
+#     "mi-claude":  { "provider": "claude" }
+#   }
+# }
+#
+# Un modelo sin entrada usa 127.0.0.1:7422. Sin bloque "models", un ":7442" en el fichero
+# selecciona el puerto 7442 (formato antiguo). El asa de configuración es un vec: 0 doc, 1 texto.
 
-fn port_legacy(raw: String) -> Int ! alloc
-    if str_contains(raw, ":7442") != 0
-        7442
-    else
-        7422
+import "salkit/json.sal"
+import "salkit/fsx.sal"
+import "salkit/strbuf.sal"
+import "src/provider/claude.sal"
 
-fn digits_at(raw: String, i: Int, acc: Int) -> Int ! alloc
-    if i >= str_len(raw)
-        acc
-    else
-        c = str_char(raw, i)
-        if c >= 48
-            if c <= 57
-                digits_at(raw, i + 1, acc * 10 + (c - 48))
-            else
-                acc
-        else
-            acc
+fn cfg_load() -> Int ! io, alloc
+    raw = fsx_read_text("supercoder.json")
+    d = json_parse("{{}}")
+    if str_len(sk_trim(raw)) > 0
+        parsed = json_parse(raw)
+        if json_ok(parsed) != 0
+            if json_is_object(parsed, json_root(parsed)) != 0
+                d = parsed
+    c = vec_new()
+    x = vec_push(c, d)
+    x = vec_push(c, str_as_int(raw))
+    c
 
-fn skip_blanks(raw: String, i: Int) -> Int ! alloc
-    if i >= str_len(raw)
-        i
-    else
-        c = str_char(raw, i)
-        if c == 32
-            skip_blanks(raw, i + 1)
-        else
-            if c == 10
-                skip_blanks(raw, i + 1)
-            else
-                i
+fn cfg_doc(c: Int) -> Int
+    vec_get(c, 0)
 
-# Puerto del bloque "models": { "<modelo>": { "port": N } }; -1 si no hay.
-fn port_of_model(raw: String, model: String) -> Int ! alloc
-    q = json_quote_char()
-    m = str_index_of(raw, q + "models" + q)
-    if m < 0
-        -1
-    else
-        k = str_index_from(raw, q + model + q, m + 8)
-        if k < 0
-            -1
-        else
-            close = str_index_from(raw, json_rbrace(), k)
-            p = str_index_from(raw, q + "port" + q, k)
-            if p < 0
-                -1
-            else
-                if close >= 0
-                    if p > close
-                        -1
-                    else
-                        digits_at(raw, skip_blanks(raw, str_index_from(raw, ":", p) + 1), 0)
-                else
-                    digits_at(raw, skip_blanks(raw, str_index_from(raw, ":", p) + 1), 0)
+fn cfg_raw(c: Int) -> String
+    str_from_int(vec_get(c, 1))
 
-# "provider" del modelo en "models" ("" si no hay).
-fn provider_of_model(raw: String, model: String) -> String ! alloc
-    q = json_quote_char()
-    m = str_index_of(raw, q + "models" + q)
-    if m < 0
-        ""
-    else
-        k = str_index_from(raw, q + model + q, m + 8)
-        if k < 0
-            ""
-        else
-            close = str_index_from(raw, json_rbrace(), k)
-            p = str_index_from(raw, q + "provider" + q, k)
-            if p < 0
-                ""
-            else
-                if close >= 0
-                    if p > close
-                        ""
-                    else
-                        provider_value(str_slice(raw, p, str_len(raw)))
-                else
-                    provider_value(str_slice(raw, p, str_len(raw)))
+fn cfg_root(c: Int) -> Int
+    json_root(vec_get(c, 0))
 
-fn provider_value(tail: String) -> String ! alloc
-    q = json_quote_char()
-    v = extract_quoted_after(tail, q + "provider" + q + ":" + q)
-    if str_len(v) > 0
-        v
-    else
-        extract_quoted_after(tail, q + "provider" + q + ": " + q)
+# Valor de una clave de primer nivel como texto ("" si falta).
+fn cfg_top_str(c: Int, key: String) -> String
+    json_get_str(cfg_doc(c), cfg_root(c), key)
 
-# Un modelo usa el backend `claude -p` con prefijo "claude:" o "provider":"claude".
-fn config_is_claude(raw: String, model: String) -> Int ! alloc
-    if claude_has_prefix(model) != 0
-        1
-    else
-        str_eq(provider_of_model(raw, model), "claude")
+# Nodo de la clave de primer nivel, o -1.
+fn cfg_top(c: Int, key: String) -> Int
+    json_get(cfg_doc(c), cfg_root(c), key)
 
-# Puerto de soso-llm para un modelo: "models" > ":7442" legado > 7422.
-fn config_port_from(raw: String, model: String) -> Int ! alloc
-    q = json_quote_char()
-    if str_contains(raw, q + "models" + q) != 0
-        p = port_of_model(raw, model)
-        if p > 0
-            p
-        else
-            7422
-    else
-        port_legacy(raw)
-
-fn config_port_for(model: String) -> Int ! io, alloc
-    config_port_from(read_file("supercoder.json"), model)
-
-fn config_port() -> Int ! io, alloc
-    config_port_from(read_file("supercoder.json"), config_model())
-
-fn config_model_default() -> String
+fn cfg_default_model() -> String
     "soso-coder"
 
-fn config_model_json(raw: String) -> String ! alloc
-    q = json_quote_char()
-    m = extract_quoted_after(raw, q + "model" + q + ":" + q)
-    if str_len(m) > 0
-        m
-    else
-        extract_quoted_after(raw, q + "model" + q + ": " + q)
-
-# Prioridad: --model > "model" en supercoder.json > modelo por defecto.
-fn config_model_for(flag: String) -> String ! io, alloc
+# Prioridad: --model > "model" del fichero > modelo por defecto.
+fn cfg_model_for(c: Int, flag: String) -> String ! alloc
     if str_len(flag) > 0
-        flag
+        return str_slice(flag, 0, str_len(flag))
+    m = cfg_top_str(c, "model")
+    if str_len(m) > 0
+        return m
+    cfg_default_model()
+
+# Nodo del bloque del modelo en "models", o -1.
+fn cfg_mnode(c: Int, model: String) -> Int
+    models = cfg_top(c, "models")
+    if models < 0
+        return 0 - 1
+    json_get(cfg_doc(c), models, model)
+
+fn cfg_has_models(c: Int) -> Int
+    if cfg_top(c, "models") >= 0
+        1
     else
-        m = config_model_json(read_file("supercoder.json"))
-        if str_len(m) > 0
-            m
-        else
-            config_model_default()
+        0
 
-fn config_model() -> String ! io, alloc
-    config_model_for("")
+fn cfg_mstr(c: Int, model: String, key: String, dflt: String) -> String ! alloc
+    n = cfg_mnode(c, model)
+    k = json_get(cfg_doc(c), n, key)
+    if k < 0
+        return dflt
+    if json_kind(cfg_doc(c), k) != 3
+        return dflt
+    json_str(cfg_doc(c), k)
 
-fn agents_md() -> String ! io, alloc
-    t = read_file("AGENTS.md")
-    if str_len(t) <= 0
-        "You are supercoder-sal on soso."
+fn cfg_mint(c: Int, model: String, key: String, dflt: Int) -> Int
+    n = cfg_mnode(c, model)
+    k = json_get(cfg_doc(c), n, key)
+    if k < 0
+        return dflt
+    json_int(cfg_doc(c), k)
+
+# "claude" si el modelo usa `claude -p`; "openai" si habla HTTP con /v1/chat/completions.
+fn cfg_provider(c: Int, model: String) -> String ! alloc
+    if claude_has_prefix(model) != 0
+        return "claude"
+    p = cfg_mstr(c, model, "provider", "")
+    if str_eq(p, "claude") != 0
+        return "claude"
+    "openai"
+
+fn cfg_is_claude(c: Int, model: String) -> Int ! alloc
+    if str_eq(cfg_provider(c, model), "claude") != 0
+        1
     else
-        t
+        0
 
-fn system_prompt() -> String ! io, alloc
-    base = agents_md()
-    sk = skills_append_default(base)
-    sk
+fn cfg_host(c: Int, model: String) -> String ! alloc
+    cfg_mstr(c, model, "host", "127.0.0.1")
+
+fn cfg_port(c: Int, model: String) -> Int ! alloc
+    p = cfg_mint(c, model, "port", 0)
+    if p > 0
+        return p
+    if cfg_has_models(c) == 0
+        if sk_contains(cfg_raw(c), ":7442") != 0
+            return 7442
+    7422
+
+# Token Bearer: "token" > "token_env" > "token_file" > $SOSO_LLM_API_KEY.
+fn cfg_token(c: Int, model: String) -> String ! io, alloc
+    t = cfg_mstr(c, model, "token", "")
+    if str_len(t) > 0
+        return t
+    ev = cfg_mstr(c, model, "token_env", "")
+    if str_len(ev) > 0
+        v = getenv(ev)
+        if str_len(v) > 0
+            return v
+    tf = cfg_mstr(c, model, "token_file", "")
+    if str_len(tf) > 0
+        content = sk_trim(fsx_read_text(tf))
+        if str_len(content) > 0
+            return content
+    sk_trim(getenv("SOSO_LLM_API_KEY"))
+
+fn cfg_max_tokens(c: Int, model: String) -> Int ! alloc
+    cfg_mint(c, model, "max_tokens", 4096)
+
+# Plazo total de una petición al modelo (ms); por defecto 2 h como OpenCode.
+fn cfg_timeout_ms(c: Int, model: String) -> Int ! alloc
+    cfg_mint(c, model, "timeout_ms", 7200000)
+
+# Presupuesto de caracteres del historial antes de compactar.
+fn cfg_context_chars(c: Int, model: String) -> Int ! alloc
+    cfg_mint(c, model, "context_chars", 60000)
+
+fn cfg_vision(c: Int, model: String) -> Int ! alloc
+    n = cfg_mnode(c, model)
+    k = json_get(cfg_doc(c), n, "vision")
+    if k < 0
+        return 0
+    json_bool(cfg_doc(c), k)
+
+fn cfg_shell(c: Int) -> String ! io, alloc
+    s = cfg_top_str(c, "shell")
+    if str_len(s) > 0
+        return s
+    if fsx_exists("/bin/sh") != 0
+        return "/bin/sh"
+    "/bin/sosh"
+
+# 1 si el modelo responde en streaming (SSE): emite eventos text_delta mientras genera.
+fn cfg_stream(c: Int, model: String) -> Int ! alloc
+    n = cfg_mnode(c, model)
+    k = json_get(cfg_doc(c), n, "stream")
+    if k < 0
+        return 0
+    json_bool(cfg_doc(c), k)

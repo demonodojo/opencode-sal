@@ -28,6 +28,11 @@ jobs:
           ref: main
           path: sal
 
+      - uses: actions/checkout@v4
+        with:
+          repository: demonodojo/salkit
+          path: salkit
+
       - name: Instalar Rust
         uses: dtolnay/rust-toolchain@stable
 

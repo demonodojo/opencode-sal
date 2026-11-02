@@ -1,0 +1,118 @@
+# Adjuntos del mensaje del usuario: `--file RUTA` y menciones `@ruta` en el prompt.
+# Los ficheros de texto se incluyen en el mensaje; las imágenes van como partes `image_url` si el
+# modelo tiene visión y, si no, se describen con "vision_model" (ver vision.sal).
+
+import "salkit/fsx.sal"
+import "salkit/strbuf.sal"
+import "src/agent/ctx.sal"
+import "src/agent/messages.sal"
+import "src/agent/vision.sal"
+import "src/util.sal"
+
+fn attach_is_space(ch: Int) -> Int
+    if ch == 32
+        return 1
+    if ch == 10
+        return 1
+    if ch == 9
+        return 1
+    if ch == 13
+        return 1
+    0
+
+# Fin (exclusivo) de la palabra que empieza en `i`.
+fn attach_word_end(s: String, i: Int) -> Int
+    n = str_len(s)
+    j = i
+    while j < n
+        if attach_is_space(str_char(s, j)) != 0
+            return j
+        j = j + 1
+    n
+
+fn attach_is_trailing(ch: Int) -> Int
+    if ch == 44
+        return 1
+    if ch == 46
+        return 1
+    if ch == 59
+        return 1
+    if ch == 58
+        return 1
+    if ch == 41
+        return 1
+    0
+
+fn attach_strip(tok: String) -> String ! alloc
+    t = tok
+    going = 1
+    while going != 0
+        n = str_len(t)
+        if n == 0
+            going = 0
+        elsif attach_is_trailing(str_char(t, n - 1)) != 0
+            t = str_slice(t, 0, n - 1)
+        else
+            going = 0
+    t
+
+# Rutas de las menciones `@ruta` que existen como fichero.
+fn attach_mentions(prompt: String) -> Int ! io, alloc
+    out = sk_sl_new()
+    n = str_len(prompt)
+    i = 0
+    while i < n
+        if str_char(prompt, i) == 64
+            starts = 1
+            if i > 0
+                starts = attach_is_space(str_char(prompt, i - 1))
+            if starts != 0
+                tok = attach_strip(str_slice(prompt, i + 1, attach_word_end(prompt, i + 1)))
+                if str_len(tok) > 0
+                    if fsx_is_file(path_abs(tok)) != 0
+                        if sk_sl_contains(out, tok) == 0
+                            x = sk_sl_push(out, tok)
+        i = i + 1
+    out
+
+fn attach_text_limit() -> Int
+    50000
+
+# Mensaje de usuario con el prompt y los adjuntos (`files_text`: rutas separadas por saltos de línea).
+fn attach_user_message(c: Int, prompt: String, files_text: String) -> String ! io, alloc
+    paths = sk_split_lines(files_text)
+    ments = attach_mentions(prompt)
+    i = 0
+    while i < sk_sl_len(ments)
+        if sk_sl_contains(paths, sk_sl_get(ments, i)) == 0
+            x = sk_sl_push(paths, sk_sl_get(ments, i))
+        i = i + 1
+    if sk_sl_len(paths) == 0
+        return msg_user(prompt)
+    nl = char_to_str(10)
+    text = str_slice(prompt, 0, str_len(prompt))
+    urls = sk_sl_new()
+    i = 0
+    while i < sk_sl_len(paths)
+        raw = sk_trim(sk_sl_get(paths, i))
+        if str_len(raw) > 0
+            p = path_abs(raw)
+            if fsx_is_file(p) == 0
+                text = text + nl + nl + "[Attachment not found: " + raw + "]"
+            elsif img_is_image(p) != 0
+                if ctx_vision(c) != 0
+                    url = img_data_url(p)
+                    if str_len(url) > 0
+                        x = sk_sl_push(urls, url)
+                        text = text + nl + nl + "[Attached image: " + raw + "]"
+                    else
+                        text = text + nl + nl + img_unavailable(raw, "the file is empty or larger than 5 MB")
+                else
+                    text = text + nl + nl + vision_describe(c, p, prompt)
+            else
+                body = fsx_read_text_max(p, attach_text_limit())
+                text = text + nl + nl + "<file path=\"" + raw + "\">" + nl + body + nl + "</file>"
+        i = i + 1
+    if sk_sl_len(urls) == 0
+        return msg_user(text)
+    img_user_message(text, urls)

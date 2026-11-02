@@ -1,0 +1,219 @@
+# Compactación del historial. soso-llm admite 64 mensajes por petición y el contexto del modelo
+# es finito: antes de cada petición, si hay demasiados mensajes o caracteres,
+#   1) se recortan las salidas de herramientas y los argumentos grandes de los mensajes antiguos;
+#   2) si no basta, los mensajes antiguos se resumen con una llamada al modelo (o, si falla, con
+#      un resumen mecánico) y se sustituyen por un único mensaje de usuario.
+# Los últimos mensajes se conservan intactos y nunca se separa una llamada de su resultado.
+
+import "salkit/json.sal"
+import "salkit/strbuf.sal"
+import "src/agent/ctx.sal"
+import "src/agent/messages.sal"
+import "src/config.sal"
+import "src/provider/openai.sal"
+
+fn compact_max_messages() -> Int
+    56
+
+fn compact_keep_tail() -> Int
+    10
+
+fn compact_chars(msgs: Int) -> Int
+    total = 0
+    i = 0
+    n = sk_sl_len(msgs)
+    while i < n
+        m = sk_sl_get(msgs, i)
+        len = str_len(m)
+        # las imágenes en base64 no cuentan por su tamaño (el servidor las trata aparte)
+        if len > 4000
+            if sk_contains(m, "data:image/") != 0
+                len = 4000
+        total = total + len
+        i = i + 1
+    total
+
+# Mensaje recortado, o el mismo texto si no hay nada que recortar.
+fn compact_trim_one(msg: String) -> String ! alloc
+    d = json_parse(msg)
+    if json_ok(d) == 0
+        return msg
+    r = json_root(d)
+    role = json_get_str(d, r, "role")
+    if str_eq(role, "tool") != 0
+        content = json_get_str(d, r, "content")
+        if str_len(content) > 600
+            note = char_to_str(10) + "[output trimmed to save context]"
+            return msg_tool(json_get_str(d, r, "tool_call_id"), str_slice(content, 0, 300) + note)
+        return msg
+    if str_eq(role, "user") != 0
+        if str_len(msg) > 4000
+            if sk_contains(msg, "data:image/") != 0
+                return compact_drop_images(d, r, msg)
+        return msg
+    if str_eq(role, "assistant") != 0
+        tcs = json_get(d, r, "tool_calls")
+        if tcs < 0
+            return msg
+        changed = 0
+        calls = vec_new()
+        n = json_first(d, tcs)
+        while n >= 0
+            fnode = json_get(d, n, "function")
+            args = json_get_str(d, fnode, "arguments")
+            if str_len(args) > 1500
+                args = "{{\"note\":\"arguments omitted to save context\"}}"
+                changed = 1
+            x = vec_push(calls, call_new(json_get_str(d, n, "id"), json_get_str(d, fnode, "name"), args))
+            n = json_next(d, n)
+        if changed == 0
+            return msg
+        return msg_assistant(json_get_str(d, r, "content"), calls)
+    msg
+
+# Mensaje de usuario sin las imágenes (queda solo el texto de las partes).
+fn compact_drop_images(d: Int, r: Int, msg: String) -> String ! alloc
+    cn = json_get(d, r, "content")
+    if cn < 0
+        return msg
+    if json_is_array(d, cn) == 0
+        return msg
+    text = ""
+    k = json_first(d, cn)
+    while k >= 0
+        if str_eq(json_get_str(d, k, "type"), "text") != 0
+            text = text + json_get_str(d, k, "text")
+        k = json_next(d, k)
+    msg_user(text + char_to_str(10) + "[images omitted to save context]")
+
+# Recorta los mensajes anteriores a la cola. Devuelve cuántos cambió.
+fn compact_trim(c: Int) -> Int ! alloc
+    msgs = ctx_msgs(c)
+    limit = sk_sl_len(msgs) - compact_keep_tail()
+    changed = 0
+    i = 0
+    while i < limit
+        old = sk_sl_get(msgs, i)
+        nw = compact_trim_one(old)
+        if str_eq(nw, old) == 0
+            x = vec_set(msgs, i, str_as_int(nw))
+            changed = changed + 1
+        i = i + 1
+    changed
+
+fn compact_role(msg: String) -> String ! alloc
+    d = json_parse(msg)
+    if json_ok(d) == 0
+        return ""
+    json_get_str(d, json_root(d), "role")
+
+# Primer mensaje de usuario como texto (la petición original), o "".
+fn compact_first_request(msgs: Int) -> String ! alloc
+    i = 0
+    n = sk_sl_len(msgs)
+    while i < n
+        d = json_parse(sk_sl_get(msgs, i))
+        if json_ok(d) != 0
+            r = json_root(d)
+            if str_eq(json_get_str(d, r, "role"), "user") != 0
+                return sk_truncate_middle(json_get_str(d, r, "content"), 4000)
+        i = i + 1
+    ""
+
+# Resumen mecánico: peticiones del usuario y herramientas usadas (sin llamar al modelo).
+fn compact_digest(old: Int) -> String ! alloc
+    nl = char_to_str(10)
+    out = "Tools used so far:"
+    i = 0
+    n = sk_sl_len(old)
+    while i < n
+        d = json_parse(sk_sl_get(old, i))
+        if json_ok(d) != 0
+            tcs = json_get(d, json_root(d), "tool_calls")
+            if tcs >= 0
+                k = json_first(d, tcs)
+                while k >= 0
+                    fnode = json_get(d, k, "function")
+                    out = out + nl + "- " + json_get_str(d, fnode, "name") + " " + sk_truncate_middle(json_get_str(d, fnode, "arguments"), 160)
+                    k = json_next(d, k)
+        i = i + 1
+    out
+
+fn compact_summary_prompt() -> String
+    "Summarize the conversation so far so that work can continue from your summary alone. Write plain text with these sections: Goal (what the user wants), Done (what has been accomplished, with the files changed), State (relevant facts discovered: paths, commands, errors), Next (what remains to do). Be specific and keep it under 400 words. Do not call tools."
+
+# Resume `old` con el modelo. Devuelve "" si la llamada falla.
+fn compact_ask_model(c: Int, old: Int) -> String ! io, alloc
+    saved_msgs = ctx_msgs(c)
+    saved_sys = ctx_system(c)
+    saved_tools = ctx_tools(c)
+    work = sk_sl_new()
+    i = 0
+    while i < sk_sl_len(old)
+        x = sk_sl_push(work, sk_sl_get(old, i))
+        i = i + 1
+    x = sk_sl_push(work, msg_user(compact_summary_prompt()))
+    x = ctx_set_msgs(c, work)
+    x = ctx_set_system(c, "You are a helpful assistant that writes concise, accurate summaries of coding sessions.")
+    x = ctx_set_tools(c, "[]")
+    r = oai_chat_plain(c)
+    x = ctx_set_msgs(c, saved_msgs)
+    x = ctx_set_system(c, saved_sys)
+    x = ctx_set_tools(c, saved_tools)
+    if pr_ok(r) == 0
+        return ""
+    x = ctx_add_tokens(c, pr_in(r), pr_out(r))
+    sk_trim(pr_text(r))
+
+# Sustituye los mensajes antiguos por un resumen. Devuelve 1 si compactó.
+fn compact_summarize(c: Int) -> Int ! io, alloc
+    msgs = ctx_msgs(c)
+    n = sk_sl_len(msgs)
+    b = n - compact_keep_tail()
+    if b < 2
+        return 0
+    # La cola no puede empezar por un resultado de herramienta.
+    while b < n
+        if str_eq(compact_role(sk_sl_get(msgs, b)), "tool") != 0
+            b = b + 1
+        else
+            return compact_apply(c, msgs, b)
+    0
+
+fn compact_apply(c: Int, msgs: Int, b: Int) -> Int ! io, alloc
+    old = sk_sl_new()
+    i = 0
+    while i < b
+        x = sk_sl_push(old, sk_sl_get(msgs, i))
+        i = i + 1
+    summary = compact_ask_model(c, old)
+    if str_len(summary) == 0
+        summary = compact_digest(old)
+    nl = char_to_str(10)
+    head = "The earlier part of this conversation was compacted to save context." + nl + nl + "## Original request" + nl + compact_first_request(old) + nl + nl + "## Summary of the work so far" + nl + summary
+    fresh = sk_sl_new()
+    x = sk_sl_push(fresh, msg_user(head))
+    n = sk_sl_len(msgs)
+    i = b
+    while i < n
+        x = sk_sl_push(fresh, sk_sl_get(msgs, i))
+        i = i + 1
+    ctx_set_msgs(c, fresh)
+
+fn compact_over(c: Int) -> Int ! alloc
+    msgs = ctx_msgs(c)
+    if sk_sl_len(msgs) > compact_max_messages()
+        return 1
+    if compact_chars(msgs) > cfg_context_chars(ctx_cfg(c), ctx_model(c))
+        return 1
+    0
+
+# Llamar antes de cada petición. Devuelve 1 si el historial cambió.
+fn compact_if_needed(c: Int) -> Int ! io, alloc
+    if compact_over(c) == 0
+        return 0
+    x = compact_trim(c)
+    if compact_over(c) == 0
+        return 1
+    y = compact_summarize(c)
+    1

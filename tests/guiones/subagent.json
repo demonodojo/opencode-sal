@@ -1,0 +1,10 @@
+{
+  "name": "subagent",
+  "description": "El padre lanza un subagente explore que lee un fichero; luego el padre responde",
+  "steps": [
+    { "type": "tool_calls", "name": "task", "arguments": { "description": "Leer fixture", "prompt": "Lee /tmp/oc-fixture.txt e informa", "subagent_type": "explore" } },
+    { "type": "tool_calls", "name": "read", "arguments": { "filePath": "/tmp/oc-fixture.txt" } },
+    { "type": "content", "text": "informe del hijo", "usage": { "prompt_tokens": 30, "completion_tokens": 3, "total_tokens": 33 } },
+    { "type": "content", "text": "padre listo" }
+  ]
+}

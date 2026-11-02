@@ -1,0 +1,9 @@
+{
+  "name": "bash_ask",
+  "description": "Dos comandos bash que requieren permiso y respuesta final",
+  "steps": [
+    { "type": "tool_calls", "name": "bash", "arguments": { "command": "touch /tmp/oc-perm-1" } },
+    { "type": "tool_calls", "name": "bash", "arguments": { "command": "touch /tmp/oc-perm-2" } },
+    { "type": "content", "text": "hecho" }
+  ]
+}

@@ -1,12 +1,12 @@
 {
   "name": "supercoder",
   "displayName": "SuperCoder",
-  "description": "Chat con supercoder (supercoder-sal) dentro de VS Code, con selección de modelo (soso-llm o claude -p).",
-  "version": "0.4.1",
+  "description": "Agente de código supercoder (supercoder-sal) en VS Code: herramientas, permisos, subagentes e imágenes, con soso-llm o claude -p.",
+  "version": "0.5.0",
   "publisher": "demonodojo",
   "license": "UNLICENSED",
   "engines": {
-    "vscode": "^1.90.0"
+    "vscode": "^1.106.0"
   },
   "categories": [
     "AI",
@@ -16,7 +16,7 @@
   "activationEvents": [],
   "contributes": {
     "viewsContainers": {
-      "activitybar": [
+      "secondarySidebar": [
         {
           "id": "supercoder",
           "title": "SuperCoder",
@@ -53,6 +53,10 @@
       {
         "command": "supercoder.stop",
         "title": "SuperCoder: Detener"
+      },
+      {
+        "command": "supercoder.attachFiles",
+        "title": "SuperCoder: Adjuntar ficheros"
       }
     ],
     "menus": {
@@ -91,13 +95,18 @@
         },
         "supercoder.maxTurns": {
           "type": "number",
-          "default": 40,
+          "default": 60,
           "description": "Máximo de vueltas del bucle de herramientas (--max-turns)."
         },
         "supercoder.historyTurns": {
           "type": "number",
           "default": 6,
-          "description": "Intercambios previos que se reenvían como contexto en cada mensaje."
+          "description": "Intercambios previos que se reenvían como contexto en el participante @supercoder (el panel usa una sesión de supercoder)."
+        },
+        "supercoder.autoApprove": {
+          "type": "boolean",
+          "default": false,
+          "description": "Aprobar sin preguntar las herramientas que piden permiso (--yes). Si está desactivado se pregunta en el panel o en un cuadro modal."
         }
       }
     },
@@ -114,6 +123,12 @@
             "description": "Elegir modelo (/model <nombre>, /model default, o sin argumento para el selector)"
           }
         ]
+      }
+    ],
+    "languageModelChatProviders": [
+      {
+        "vendor": "supercoder",
+        "displayName": "SuperCoder"
       }
     ]
   },

@@ -1,0 +1,91 @@
+# Proceso hijo con pipes: stdin/stdout del hijo se leen y escriben por líneas.
+# Lo usan la herramienta task (subagentes) y el TUI (cada turno corre en un proceso aparte para que
+# la memoria del TUI no crezca con las conversaciones largas).
+#
+# Asa (vec): 0 pid, 1 lectura de stdout, 2 escritura de stdin, 3 estado [búfer].
+
+import "io/io.sal"
+import "io/abi.sal"
+import "io/process.sal"
+import "io/pipe.sal"
+import "io/time.sal"
+import "salkit/strbuf.sal"
+import "salkit/proc.sal"
+
+# Lanza `bin` con la lista de argumentos `args` (sin argv[0]). Devuelve el asa, o -1 si falla.
+fn child_start(bin: String, args: Int) -> Int ! io, alloc
+    argv_l = sk_sl_new()
+    x = sk_sl_push(argv_l, bin)
+    i = 0
+    while i < sk_sl_len(args)
+        y = sk_sl_push(argv_l, sk_sl_get(args, i))
+        i = i + 1
+    out_pipe = pipe_create()
+    in_pipe = pipe_create()
+    if out_pipe < 0
+        return 0 - 1
+    if in_pipe < 0
+        return 0 - 1
+    out_rd = pipe_read_fd(out_pipe)
+    out_wr = pipe_write_fd(out_pipe)
+    in_rd = pipe_read_fd(in_pipe)
+    in_wr = pipe_write_fd(in_pipe)
+    pid = spawn_io_argv(bin, vec_len(argv_l), proc_argv_tab(argv_l), in_rd, out_wr, 2, d"", 0 - 1)
+    x2 = close_fd(out_wr)
+    x3 = close_fd(in_rd)
+    if pid < 0
+        x4 = close_fd(out_rd)
+        x5 = close_fd(in_wr)
+        return 0 - 1
+    st = vec_new()
+    x6 = vec_push(st, str_as_int(""))
+    h = vec_new()
+    x7 = vec_push(h, pid)
+    x7 = vec_push(h, out_rd)
+    x7 = vec_push(h, in_wr)
+    x7 = vec_push(h, st)
+    h
+
+# Siguiente línea de stdout del hijo; char 4 al terminar o tras `idle_ms` sin datos.
+fn child_read_line(h: Int, idle_ms: Int) -> String ! io, alloc
+    fd = vec_get(h, 1)
+    st = vec_get(h, 3)
+    chunk = bytes_new(65536)
+    waited = 0
+    result = ""
+    done = 0
+    while done == 0
+        buf = str_from_int(vec_get(st, 0))
+        nlp = sk_index_of(buf, char_to_str(10))
+        if nlp >= 0
+            result = str_slice(buf, 0, nlp)
+            x = vec_set(st, 0, str_as_int(str_slice(buf, nlp + 1, str_len(buf))))
+            done = 1
+        else
+            k = read_timeout_fd(fd, bytes_ptr(chunk), 65536, 1000)
+            if k > 0
+                x = vec_set(st, 0, str_as_int(buf + bytes_to_str(bytes_view(chunk, 0, k))))
+                waited = 0
+            elsif k == 0
+                if str_len(buf) > 0
+                    result = buf
+                    x = vec_set(st, 0, str_as_int(""))
+                else
+                    result = char_to_str(4)
+                done = 1
+            else
+                waited = waited + 1000
+                if waited >= idle_ms
+                    result = char_to_str(4)
+                    done = 1
+    result
+
+fn child_write_line(h: Int, line: String) -> Int ! io, alloc
+    write_str_fd(vec_get(h, 2), line + char_to_str(10))
+
+# Cierra los pipes y espera al hijo. Devuelve su código de salida.
+fn child_finish(h: Int) -> Int ! io, alloc
+    x = close_fd(vec_get(h, 2))
+    status = wait_pid(vec_get(h, 0))
+    y = close_fd(vec_get(h, 1))
+    wait_exit_code(status)

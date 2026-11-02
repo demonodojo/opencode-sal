@@ -1,17 +1,58 @@
-import "io/fs.sal"
+# Sesiones: el historial completo (mensajes JSON) se guarda en
+# <home>/sessions/<id>/messages.json y se recarga con --continue.
+#
+# <home> = $SUPERCODER_HOME, o $HOME/.local/share/supercoder, o /var/supercoder (soso).
 
-fn session_path(id: String) -> String ! alloc
-    "/var/supercoder/sessions/" + id + "/state.json"
+import "salkit/json.sal"
+import "salkit/fsx.sal"
+import "salkit/strbuf.sal"
 
-fn session_save(id: String, body: String) -> Int ! io, alloc
-    write_file_path(session_path(id), body)
+fn session_home() -> String ! io, alloc
+    h = getenv("SUPERCODER_HOME")
+    if str_len(h) > 0
+        return h
+    home = getenv("HOME")
+    if str_len(home) > 0
+        return home + "/.local/share/supercoder"
+    "/var/supercoder"
 
-fn session_load(id: String) -> String ! io, alloc
-    read_file(session_path(id))
+fn session_dir(id: String) -> String ! io, alloc
+    session_home() + "/sessions/" + id
 
-fn session_continue_prompt(id: String, prompt: String) -> String ! io, alloc
-    prev = session_load(id)
-    if str_len(prev) <= 0
-        prompt
-    else
-        "Continue prior session.\n" + prompt + "\n(context:" + str_slice(prev, 0, 512) + ")"
+fn session_file(id: String, name: String) -> String ! io, alloc
+    session_dir(id) + "/" + name
+
+# Guarda el historial: array JSON con un mensaje por elemento. 0 si ok.
+fn session_save(id: String, msgs: Int) -> Int ! io, alloc
+    fsx_write(session_file(id, "messages.json"), jb_arr(jb_join(msgs)))
+
+# Recarga el historial como lista de mensajes (vacía si no hay sesión).
+fn session_load(id: String) -> Int ! io, alloc
+    out = sk_sl_new()
+    raw = fsx_read_text(session_file(id, "messages.json"))
+    if str_len(sk_trim(raw)) == 0
+        return out
+    d = json_parse(raw)
+    if json_ok(d) == 0
+        return out
+    r = json_root(d)
+    if json_is_array(d, r) == 0
+        return out
+    n = json_first(d, r)
+    while n >= 0
+        x = sk_sl_push(out, json_dump(d, n))
+        n = json_next(d, n)
+    out
+
+# Identificadores de las sesiones guardadas, ordenados.
+fn session_list() -> Int ! io, alloc
+    names = fsx_list_dir(session_home() + "/sessions")
+    out = sk_sl_new()
+    i = 0
+    n = sk_sl_len(names)
+    while i < n
+        nm = sk_sl_get(names, i)
+        if sk_ends_with(nm, "/") != 0
+            x = sk_sl_push(out, str_slice(nm, 0, str_len(nm) - 1))
+        i = i + 1
+    out

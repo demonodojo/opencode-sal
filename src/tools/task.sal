@@ -1,0 +1,123 @@
+# Herramienta task: lanza un subagente como proceso hijo (`supercoder run --agent TIPO`).
+#
+# El hijo escribe sus eventos JSON por un pipe. El padre los reemite como eventos `subagent`,
+# reenvía al cliente las peticiones de permiso del hijo (y devuelve la respuesta por el stdin del
+# hijo) y toma como resultado el último texto del hijo. Profundidad máxima 1.
+
+import "io/io.sal"
+import "salkit/json.sal"
+import "salkit/strbuf.sal"
+import "src/agent/child.sal"
+import "src/agent/ctx.sal"
+import "src/agents.sal"
+import "src/config.sal"
+import "src/events.sal"
+import "src/perm.sal"
+import "src/tools/common.sal"
+
+fn task_max_turns() -> Int
+    40
+
+# Ejecutable que se vuelve a lanzar: "binary" de la configuración, argv(0) o /bin/supercoder.
+fn task_binary(c: Int) -> String ! io, alloc
+    b = cfg_top_str(ctx_cfg(c), "binary")
+    if str_len(b) > 0
+        return b
+    a0 = argv(0)
+    if sk_contains(a0, "/") != 0
+        return a0
+    "/bin/supercoder"
+
+fn task_reply_word(r: Int) -> String
+    if r == 2
+        return "always"
+    if r == 1
+        return "once"
+    "reject"
+
+fn tool_task(c: Int, d: Int, a: Int) -> Int ! io, alloc
+    desc = arg_str(d, a, "description", "subagent task")
+    prompt = arg_str(d, a, "prompt,task,instructions", "")
+    kind = sk_trim(arg_str(d, a, "subagent_type,agent", "general"))
+    if ctx_depth(c) >= 1
+        return tr_err("Subagents cannot launch other subagents")
+    if str_len(sk_trim(prompt)) == 0
+        return tr_err("Missing required parameter 'prompt' for tool 'task'")
+    ag = agent_find(kind)
+    if ag < 0
+        return tr_err("Unknown agent '" + kind + "'. Available subagents:" + char_to_str(10) + agents_describe(1))
+    if ag_is_sub(ag) == 0
+        return tr_err("Agent '" + kind + "' is a primary agent and cannot be used as a subagent. Available subagents:" + char_to_str(10) + agents_describe(1))
+    call_id = ctx_call(c)
+    argv_l = sk_sl_new()
+    bin = task_binary(c)
+    x = sk_sl_push(argv_l, "run")
+    x = sk_sl_push(argv_l, "--format")
+    x = sk_sl_push(argv_l, "json")
+    x = sk_sl_push(argv_l, "--agent")
+    x = sk_sl_push(argv_l, kind)
+    x = sk_sl_push(argv_l, "--session")
+    x = sk_sl_push(argv_l, ctx_session(c) + "-task-" + call_id)
+    x = sk_sl_push(argv_l, "--depth")
+    x = sk_sl_push(argv_l, "1")
+    x = sk_sl_push(argv_l, "--max-turns")
+    x = sk_sl_push(argv_l, int_to_str(task_max_turns()))
+    if str_len(ag_model(ag)) == 0
+        x = sk_sl_push(argv_l, "--model")
+        x = sk_sl_push(argv_l, ctx_model(c))
+    if ctx_interactive(c) != 0
+        x = sk_sl_push(argv_l, "--interactive")
+    elsif ctx_yes(c) != 0
+        x = sk_sl_push(argv_l, "--yes")
+    x = sk_sl_push(argv_l, "--")
+    x = sk_sl_push(argv_l, prompt)
+
+    h = child_start(bin, argv_l)
+    if h < 0
+        return tr_err("Could not start the subagent (" + bin + ")")
+    final_text = ""
+    err_text = ""
+    tin = 0
+    tout = 0
+    idle = cfg_timeout_ms(ctx_cfg(c), ctx_model(c))
+    go = 1
+    while go != 0
+        line = child_read_line(h, idle)
+        if str_eq(line, char_to_str(4)) != 0
+            go = 0
+        else
+            ed = json_parse(line)
+            if json_ok(ed) != 0
+                er = json_root(ed)
+                et = json_get_str(ed, er, "type")
+                x = ev_subagent(c, call_id, line)
+                if str_eq(et, "text") != 0
+                    final_text = json_get_str(ed, er, "part.text")
+                    tx = json_path(ed, er, "part.text")
+                    if tx >= 0
+                        final_text = json_str(ed, tx)
+                elsif str_eq(et, "error") != 0
+                    em = json_path(ed, er, "error.data.message")
+                    if em >= 0
+                        err_text = json_str(ed, em)
+                elsif str_eq(et, "step_finish") != 0
+                    tin = tin + json_int(ed, json_path(ed, er, "part.tokens.input"))
+                    tout = tout + json_int(ed, json_path(ed, er, "part.tokens.output"))
+                elsif str_eq(et, "tool_use") != 0
+                    if ctx_out(c) == 2
+                        tp = json_path(ed, er, "part.state.status")
+                        if tp >= 0
+                            if str_eq(json_str(ed, tp), "running") != 0
+                                x = ev_tui_log_add("tool " + json_get_str(ed, json_get(ed, er, "part"), "tool"))
+                elsif str_eq(et, "permission_request") != 0
+                    pp = json_get(ed, er, "part")
+                    reply = perm_ask(c, json_get_str(ed, pp, "tool"), json_get_str(ed, pp, "title"), json_dump(ed, json_get(ed, pp, "input")))
+                    msg = jb_obj(jb_kv("type", json_quote("permission_reply")) + "," + jb_kv("id", json_quote(json_get_str(ed, pp, "id"))) + "," + jb_kv("reply", json_quote(task_reply_word(reply))))
+                    x = child_write_line(h, msg)
+    code = child_finish(h)
+    x = ctx_add_tokens(c, tin, tout)
+    if str_len(err_text) > 0
+        return tr_err("Subagent '" + kind + "' failed: " + err_text)
+    if str_len(final_text) == 0
+        return tr_err("Subagent '" + kind + "' returned no text (exit code " + int_to_str(code) + ")")
+    tr_ok(final_text, desc)

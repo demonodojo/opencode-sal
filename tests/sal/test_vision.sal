@@ -1,0 +1,52 @@
+import "../../src/agent/attach.sal"
+import "salkit/fsx.sal"
+import "salkit/json.sal"
+import "support/assert.sal"
+
+fn mkcfg(text: String) -> Int ! alloc
+    c = vec_new()
+    x = vec_push(c, json_parse(text))
+    x = vec_push(c, str_as_int(text))
+    c
+
+fn main() -> Int ! io, alloc
+    f = 0
+    f = f + ck_int(img_is_image("a/b/shot.PNG"), 1, 1)
+    f = f + ck_int(img_is_image("x.jpeg"), 1, 2)
+    f = f + ck_int(img_is_image("notes.txt"), 0, 3)
+    f = f + ck_int(img_is_image("dir.png/readme"), 0, 4)
+    f = f + ck_str(img_mime("a.jpg"), "image/jpeg", 5)
+    f = f + ck_str(img_mime("a.png"), "image/png", 6)
+
+    base = "target/visiontest"
+    # 4 bytes cualquiera con extensión .png
+    w = fsx_write(base + "/p.png", "ABCD")
+    f = f + ck_str(img_data_url(base + "/p.png"), "data:image/png;base64,QUJDRA==", 7)
+    f = f + ck_str(img_data_url(base + "/missing.png"), "", 8)
+    w2 = fsx_write(base + "/n.txt", "hola nota")
+
+    ms = attach_mentions("mira @target/visiontest/n.txt, y @nada.txt y user@example.com")
+    f = f + ck_int(sk_sl_len(ms), 1, 10)
+    f = f + ck_str(sk_sl_get(ms, 0), "target/visiontest/n.txt", 11)
+
+    c = ctx_new()
+    x = ctx_set_cfg(c, mkcfg("{{}}"))
+    m0 = attach_user_message(c, "sin adjuntos", "")
+    f = f + ck_str(m0, "{{\"role\":\"user\",\"content\":\"sin adjuntos\"}}", 20)
+    m1 = attach_user_message(c, "ver @target/visiontest/n.txt", "")
+    f = f + ck_contains(m1, "<file path=", 21)
+    f = f + ck_contains(m1, "hola nota", 22)
+
+    # sin visión y sin vision_model: aviso, nunca image_url
+    m2 = attach_user_message(c, "ver", base + "/p.png")
+    f = f + ck_int(sk_contains(m2, "image_url"), 0, 23)
+    f = f + ck_contains(m2, "no \\\"vision_model\\\" is configured", 24)
+    # con visión: parte image_url con la data URL
+    x = ctx_set_vision(c, 1)
+    m3 = attach_user_message(c, "ver", base + "/p.png")
+    f = f + ck_contains(m3, "\"type\":\"image_url\"", 25)
+    f = f + ck_contains(m3, "data:image/png;base64,QUJDRA==", 26)
+    f = f + ck_contains(m3, "[Attached image: target/visiontest/p.png]", 27)
+    m4 = attach_user_message(c, "ver", base + "/ausente.png")
+    f = f + ck_contains(m4, "Attachment not found", 28)
+    f

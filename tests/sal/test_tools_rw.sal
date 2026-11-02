@@ -1,0 +1,80 @@
+import "../../src/tools/read.sal"
+import "../../src/tools/write.sal"
+import "../../src/tools/edit.sal"
+import "../../src/tools/common.sal"
+import "salkit/json.sal"
+import "support/assert.sal"
+
+# Ejecuta una herramienta con argumentos JSON.
+fn run_read(args: String) -> Int ! io, alloc
+    d = json_parse(args)
+    tool_read(0, d, json_root(d))
+
+fn run_write(args: String) -> Int ! io, alloc
+    d = json_parse(args)
+    tool_write(0, d, json_root(d))
+
+fn run_edit(args: String) -> Int ! io, alloc
+    d = json_parse(args)
+    tool_edit(0, d, json_root(d))
+
+fn main() -> Int ! io, alloc
+    f = 0
+    base = "target/rwtest"
+    p = base + "/a.txt"
+    w = run_write("{{\"filePath\":\"" + p + "\",\"content\":\"l1\\nl2\\nl3\\nl4\\n\"}}")
+    f = f + ck_int(tr_failed(w), 0, 1)
+    f = f + ck_contains(tr_output(w), "Created", 2)
+    w2 = run_write("{{\"path\":\"" + p + "\",\"content\":\"l1\\nl2\\nl3\\nl4\\n\"}}")
+    f = f + ck_contains(tr_output(w2), "Overwrote", 3)
+
+    r = run_read("{{\"filePath\":\"" + p + "\"}}")
+    f = f + ck_int(tr_failed(r), 0, 4)
+    f = f + ck_str(tr_output(r), "<file>\n00001| l1\n00002| l2\n00003| l3\n00004| l4\n</file>", 5)
+    r2 = run_read("{{\"filePath\":\"" + p + "\",\"offset\":2,\"limit\":2}}")
+    f = f + ck_str(tr_output(r2), "<file>\n00002| l2\n00003| l3\n\n(File has more lines. Use the 'offset' parameter to read beyond line 3)\n</file>", 6)
+    r3 = run_read("{{\"filePath\":\"" + base + "/missing.txt\"}}")
+    f = f + ck_int(tr_failed(r3), 1, 7)
+    f = f + ck_contains(tr_output(r3), "File not found", 8)
+    r4 = run_read("{{\"filePath\":\"" + base + "\"}}")
+    f = f + ck_contains(tr_output(r4), "a.txt", 9)
+
+    e = run_edit("{{\"filePath\":\"" + p + "\",\"oldString\":\"l2\",\"newString\":\"two\"}}")
+    f = f + ck_int(tr_failed(e), 0, 10)
+    f = f + ck_contains(tr_output(e), "1 replacement", 11)
+    f = f + ck_contains(tr_output(run_read("{{\"filePath\":\"" + p + "\"}}")), "00002| two", 12)
+
+    e2 = run_edit("{{\"filePath\":\"" + p + "\",\"oldString\":\"nothing here\",\"newString\":\"x\"}}")
+    f = f + ck_int(tr_failed(e2), 1, 13)
+    f = f + ck_contains(tr_output(e2), "was not found", 14)
+
+    w3 = run_write("{{\"filePath\":\"" + p + "\",\"content\":\"dup\\ndup\\n   indented line\\n\"}}")
+    e3 = run_edit("{{\"filePath\":\"" + p + "\",\"oldString\":\"dup\",\"newString\":\"x\"}}")
+    f = f + ck_int(tr_failed(e3), 1, 15)
+    f = f + ck_contains(tr_output(e3), "matched 2 places", 16)
+    e4 = run_edit("{{\"filePath\":\"" + p + "\",\"oldString\":\"dup\",\"newString\":\"x\",\"replaceAll\":true}}")
+    f = f + ck_contains(tr_output(e4), "2 replacements", 17)
+    f = f + ck_contains(tr_output(run_read("{{\"filePath\":\"" + p + "\"}}")), "00001| x", 18)
+
+    e5 = run_edit("{{\"filePath\":\"" + p + "\",\"oldString\":\"indented line\",\"newString\":\"changed\"}}")
+    f = f + ck_int(tr_failed(e5), 0, 19)
+    e6 = run_edit("{{\"filePath\":\"" + p + "\",\"oldString\":\"      changed\",\"newString\":\"  ok\"}}")
+    f = f + ck_int(tr_failed(e6), 0, 20)
+    f = f + ck_contains(tr_output(e6), "ignoring indentation", 21)
+    f = f + ck_contains(tr_output(run_read("{{\"filePath\":\"" + p + "\"}}")), "00003|   ok", 22)
+
+    e7 = run_edit("{{\"filePath\":\"" + p + "\",\"oldString\":\"x\",\"newString\":\"x\"}}")
+    f = f + ck_int(tr_failed(e7), 1, 23)
+    e8 = run_edit("{{\"filePath\":\"" + base + "/new.txt\",\"oldString\":\"\",\"newString\":\"fresh\"}}")
+    f = f + ck_contains(tr_output(e8), "Created", 24)
+    e9 = run_edit("{{\"filePath\":\"" + base + "/zzz.txt\",\"oldString\":\"a\",\"newString\":\"b\"}}")
+    f = f + ck_int(tr_failed(e9), 1, 25)
+    e10 = run_edit("{{\"file_path\":\"" + p + "\",\"old_string\":\"ok\",\"new_string\":\"fin\"}}")
+    f = f + ck_int(tr_failed(e10), 0, 26)
+
+    a1 = json_parse("{{\"n\":\"5\",\"b\":\"true\",\"s\":7}}")
+    f = f + ck_int(arg_int(a1, 0, "n", 0), 5, 30)
+    f = f + ck_int(arg_bool(a1, 0, "b", 0), 1, 31)
+    f = f + ck_str(arg_str(a1, 0, "x,s", "d"), "7", 32)
+    f = f + ck_int(arg_has(a1, 0, "nope,n"), 1, 33)
+    f

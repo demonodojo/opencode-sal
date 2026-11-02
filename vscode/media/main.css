@@ -12,8 +12,22 @@ button:hover { background: var(--vscode-button-secondaryHoverBackground); }
 .msg { margin: 0 0 10px; padding: 6px 8px; border-radius: 4px; white-space: pre-wrap; word-break: break-word; }
 .user { background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, transparent); }
 .assistant { background: transparent; }
-.tool { font-size: 0.9em; opacity: 0.8; font-family: var(--vscode-editor-font-family); }
-.tool.done::before { content: "✓ "; } .tool.running::before { content: "… "; }
+.tool { font-size: 0.9em; font-family: var(--vscode-editor-font-family); padding: 2px 8px; margin-bottom: 6px;
+  border-left: 2px solid var(--vscode-panel-border); }
+.tool summary { cursor: pointer; opacity: 0.85; }
+.tool.done > summary::before { content: "✓ "; } .tool.running > summary::before { content: "… "; }
+.tool.failed > summary::before { content: "✗ "; color: var(--vscode-errorForeground); }
+.tool .label { font-size: 0.8em; opacity: 0.6; margin-top: 4px; }
+.tool pre { max-height: 220px; overflow: auto; margin: 2px 0; }
+.nested { margin: 4px 0 4px 8px; }
+.todos { border: 1px solid var(--vscode-panel-border); }
+.todo.completed, .todo.cancelled { opacity: 0.6; text-decoration: line-through; }
+.todo.in_progress { font-weight: bold; }
+.permission { border: 1px solid var(--vscode-inputValidation-warningBorder, orange); }
+.permission .row { margin-top: 6px; }
+#chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 4px; }
+.chip { background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); border-radius: 8px;
+  padding: 1px 8px; cursor: pointer; font-size: 0.85em; }
 .error { color: var(--vscode-errorForeground); }
 .meta { font-size: 0.8em; opacity: 0.6; }
 pre { background: var(--vscode-textCodeBlock-background); padding: 6px; overflow-x: auto; border-radius: 3px; }

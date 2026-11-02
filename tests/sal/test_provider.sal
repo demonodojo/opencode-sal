@@ -1,0 +1,46 @@
+import "../../src/provider/openai.sal"
+import "../../src/agent/messages.sal"
+import "support/assert.sal"
+
+fn main() -> Int ! io, alloc
+    f = 0
+    ok = "{{\"choices\":[{{\"message\":{{\"role\":\"assistant\",\"content\":\"hola\",\"tool_calls\":[{{\"id\":\"call_7\",\"type\":\"function\",\"function\":{{\"name\":\"read\",\"arguments\":\"{{\\\"filePath\\\":\\\"/tmp/x\\\"}}\"}}}}]}},\"finish_reason\":\"tool_calls\"}}],\"usage\":{{\"prompt_tokens\":11,\"completion_tokens\":3,\"total_tokens\":14}}}}"
+    r = oai_parse(200, ok)
+    f = f + ck_int(pr_ok(r), 1, 1)
+    f = f + ck_str(pr_text(r), "hola", 2)
+    f = f + ck_int(vec_len(pr_calls(r)), 1, 3)
+    call = vec_get(pr_calls(r), 0)
+    f = f + ck_str(call_id(call), "call_7", 4)
+    f = f + ck_str(call_name(call), "read", 5)
+    f = f + ck_str(call_args(call), "{{\"filePath\":\"/tmp/x\"}}", 6)
+    f = f + ck_int(pr_in(r), 11, 7)
+    f = f + ck_int(pr_out(r), 3, 8)
+    f = f + ck_str(pr_finish(r), "tool_calls", 9)
+
+    txt = "{{\"choices\":[{{\"message\":{{\"role\":\"assistant\",\"content\":\"solo texto\"}},\"finish_reason\":\"stop\"}}]}}"
+    r2 = oai_parse(200, txt)
+    f = f + ck_int(vec_len(pr_calls(r2)), 0, 10)
+    f = f + ck_str(pr_text(r2), "solo texto", 11)
+
+    obj = "{{\"choices\":[{{\"message\":{{\"content\":null,\"tool_calls\":[{{\"function\":{{\"name\":\"bash\",\"arguments\":{{\"command\":\"ls\"}}}}}}]}}}}]}}"
+    r3 = oai_parse(200, obj)
+    f = f + ck_str(call_args(vec_get(pr_calls(r3), 0)), "{{\"command\":\"ls\"}}", 12)
+    f = f + ck_str(call_id(vec_get(pr_calls(r3), 0)), "call_1", 13)
+
+    e = oai_parse(400, "{{\"error\":{{\"message\":\"bad things\"}}}}")
+    f = f + ck_int(pr_ok(e), 0, 14)
+    f = f + ck_str(pr_error(e), "bad things", 15)
+    f = f + ck_int(pr_status(e), 400, 16)
+    e2 = oai_parse(500, "plain failure")
+    f = f + ck_str(pr_error(e2), "plain failure", 17)
+    e3 = oai_parse(200, "not json")
+    f = f + ck_int(pr_ok(e3), 0, 18)
+
+    f = f + ck_str(msg_user("hi \"there\""), "{{\"role\":\"user\",\"content\":\"hi \\\"there\\\"\"}}", 20)
+    f = f + ck_str(msg_tool("call_1", "out"), "{{\"role\":\"tool\",\"tool_call_id\":\"call_1\",\"content\":\"out\"}}", 21)
+    calls = vec_new()
+    x = vec_push(calls, call_new("call_1", "read", "{{\"filePath\":\"a\"}}"))
+    am = msg_assistant("", calls)
+    f = f + ck_str(am, "{{\"role\":\"assistant\",\"content\":\"\",\"tool_calls\":[{{\"id\":\"call_1\",\"type\":\"function\",\"function\":{{\"name\":\"read\",\"arguments\":\"{{\\\"filePath\\\":\\\"a\\\"}}\"}}}}]}}", 22)
+    f = f + ck_str(msg_assistant("t", -1), "{{\"role\":\"assistant\",\"content\":\"t\"}}", 23)
+    f

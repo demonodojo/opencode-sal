@@ -1,0 +1,379 @@
+# Permisos de herramientas: allow / ask / deny.
+#
+# Reglas de `supercoder.json` (formato de opencode.json), sobrescribibles por agente:
+#   "permission": { "edit": "ask", "bash": { "git status*": "allow", "*": "ask" },
+#                   "external_directory": "ask" }
+# Dentro de un objeto de patrones gana la última regla que casa. Sin regla se aplica el valor
+# por defecto: leer y editar allow, bash allow solo para comandos de lectura (si no, ask), rutas
+# fuera del directorio de trabajo ask.
+#
+# `ask` se resuelve así: --yes aprueba; con --interactive se pregunta al cliente (JSON: evento
+# permission_request y respuesta por stdin; texto: pregunta en stderr); sin cliente se rechaza.
+# La respuesta "always" se recuerda en la sesión (grants.txt).
+
+import "io/io.sal"
+import "salkit/json.sal"
+import "salkit/strbuf.sal"
+import "salkit/fsx.sal"
+import "src/agent/ctx.sal"
+import "src/config.sal"
+import "src/events.sal"
+import "src/session.sal"
+import "src/tools/common.sal"
+import "src/util.sal"
+
+# Casa `pat` con `s`: `*` cualquier texto (también "/"), `?` un carácter.
+fn perm_wild(pat: String, s: String) -> Int
+    np = str_len(pat)
+    ns = str_len(s)
+    p = 0
+    i = 0
+    star = 0 - 1
+    mark = 0
+    ok = 1
+    done = 0
+    while done == 0
+        if i >= ns
+            done = 1
+        else
+            adv = 0
+            if p < np
+                pc = str_char(pat, p)
+                if pc == 42
+                    star = p
+                    mark = i
+                    p = p + 1
+                    adv = 1
+                elsif pc == 63
+                    p = p + 1
+                    i = i + 1
+                    adv = 1
+                elsif pc == str_char(s, i)
+                    p = p + 1
+                    i = i + 1
+                    adv = 1
+            if adv == 0
+                if star >= 0
+                    mark = mark + 1
+                    i = mark
+                    p = star + 1
+                else
+                    ok = 0
+                    done = 1
+    if ok == 0
+        return 0
+    while p < np
+        if str_char(pat, p) != 42
+            return 0
+        p = p + 1
+    1
+
+# Como perm_wild; además "git status *" casa con "git status" a secas.
+fn perm_match(pat: String, s: String) -> Int ! alloc
+    if perm_wild(pat, s) != 0
+        return 1
+    if sk_ends_with(pat, " *") != 0
+        if str_eq(str_slice(pat, 0, str_len(pat) - 2), s) != 0
+            return 1
+    0
+
+# allow 0, ask 1, deny 2; -1 si no es un valor válido.
+fn perm_val(word: String) -> Int ! alloc
+    w = sk_lower(sk_trim(word))
+    if str_eq(w, "allow") != 0
+        return 0
+    if str_eq(w, "ask") != 0
+        return 1
+    if str_eq(w, "deny") != 0
+        return 2
+    0 - 1
+
+# Regla de `kind` en el objeto de permisos `node` del documento `d`; -1 si no hay.
+fn perm_rule(d: Int, node: Int, kind: String, subject: String) -> Int ! alloc
+    if node < 0
+        return 0 - 1
+    if json_is_string(d, node) != 0
+        return perm_val(json_str(d, node))
+    if json_is_object(d, node) == 0
+        return 0 - 1
+    v = json_get(d, node, kind)
+    if v < 0
+        return 0 - 1
+    if json_is_string(d, v) != 0
+        return perm_val(json_str(d, v))
+    res = 0 - 1
+    if json_is_object(d, v) != 0
+        k = json_first(d, v)
+        while k >= 0
+            if perm_match(json_key(d, k), subject) != 0
+                x = perm_val(json_str(d, k))
+                if x >= 0
+                    res = x
+            k = json_next(d, k)
+    res
+
+# 1 si el comando solo lee: sin metacaracteres de shell y de una lista de programas inocuos.
+fn perm_bash_readonly(cmd: String) -> Int ! alloc
+    t = sk_trim(cmd)
+    if str_len(t) == 0
+        return 0
+    i = 0
+    n = str_len(t)
+    while i < n
+        ch = str_char(t, i)
+        if ch == 59
+            return 0
+        if ch == 38
+            return 0
+        if ch == 124
+            return 0
+        if ch == 60
+            return 0
+        if ch == 62
+            return 0
+        if ch == 36
+            return 0
+        if ch == 96
+            return 0
+        if ch == 10
+            return 0
+        if ch == 40
+            return 0
+        i = i + 1
+    words = sk_split_char(t, 32)
+    w0 = sk_sl_get(words, 0)
+    simple = sk_split_char("ls,cat,head,tail,pwd,echo,wc,grep,rg,stat,file,which,date,whoami,uname,tree,sort,uniq,diff,basename,dirname,realpath,true,false", 44)
+    if sk_sl_contains(simple, w0) != 0
+        return 1
+    if str_eq(w0, "git") != 0
+        if sk_sl_len(words) >= 2
+            sub = sk_sl_get(words, 1)
+            gits = sk_split_char("status,diff,log,show,branch,rev-parse,remote,tag,ls-files,blame,describe", 44)
+            if sk_sl_contains(gits, sub) != 0
+                return 1
+    0
+
+fn perm_default(kind: String, subject: String) -> Int ! alloc
+    if str_eq(kind, "bash") != 0
+        if perm_bash_readonly(subject) != 0
+            return 0
+        return 1
+    if str_eq(kind, "external_directory") != 0
+        return 1
+    0
+
+# Decisión para (kind, subject): reglas del agente, luego las de la configuración, luego las por defecto.
+fn perm_decide(c: Int, kind: String, subject: String) -> Int ! alloc
+    ap = ctx_agent_perm(c)
+    if str_len(ap) > 0
+        ad = json_parse(ap)
+        if json_ok(ad) != 0
+            r = perm_rule(ad, json_root(ad), kind, subject)
+            if r >= 0
+                return r
+    cfg = ctx_cfg(c)
+    r2 = perm_rule(cfg_doc(cfg), cfg_top(cfg, "permission"), kind, subject)
+    if r2 >= 0
+        return r2
+    perm_default(kind, subject)
+
+# ---------------------------------------------------------------- permisos recordados ("always")
+
+fn perm_tab() -> String ! alloc
+    char_to_str(9)
+
+fn perm_grants_load(c: Int) -> Int ! io, alloc
+    ctx_set_grants(c, fsx_read_text(session_file(ctx_session(c), "grants.txt")))
+
+fn perm_granted(c: Int, kind: String, subject: String) -> Int ! alloc
+    lines = sk_split_lines(ctx_grants(c))
+    i = 0
+    n = sk_sl_len(lines)
+    while i < n
+        ln = sk_sl_get(lines, i)
+        t = sk_index_of(ln, perm_tab())
+        if t > 0
+            if str_eq(str_slice(ln, 0, t), kind) != 0
+                if perm_match(str_slice(ln, t + 1, str_len(ln)), subject) != 0
+                    return 1
+        i = i + 1
+    0
+
+# Patrón que se recuerda con "always" para (kind, subject).
+fn perm_pattern(kind: String, subject: String) -> String ! alloc
+    if str_eq(kind, "bash") != 0
+        words = sk_split_char(sk_trim(subject), 32)
+        w0 = sk_sl_get(words, 0)
+        pre = sk_split_char("git,npm,pnpm,yarn,cargo,sal,make,docker,python,python3,node,go,pip", 44)
+        if sk_sl_len(words) >= 2
+            if sk_sl_contains(pre, w0) != 0
+                return w0 + " " + sk_sl_get(words, 1) + " *"
+        return w0 + " *"
+    if str_eq(kind, "external_directory") != 0
+        return subject
+    "*"
+
+fn perm_grant(c: Int, kind: String, subject: String) -> Int ! io, alloc
+    g = ctx_grants(c)
+    g = g + kind + perm_tab() + perm_pattern(kind, subject) + char_to_str(10)
+    x = ctx_set_grants(c, g)
+    fsx_write(session_file(ctx_session(c), "grants.txt"), g)
+
+# ---------------------------------------------------------------- preguntar al cliente
+
+# Lee una línea de stdin; devuelve char 4 si hay fin de fichero antes de recibir nada.
+fn perm_read_line() -> String ! io, alloc
+    buf = bytes_new(1)
+    acc = ""
+    done = 0
+    while done == 0
+        n = read_fd(0, bytes_ptr(buf), 1)
+        if n <= 0
+            if str_len(acc) == 0
+                acc = char_to_str(4)
+            done = 1
+        else
+            ch = bytes_get_u8(buf, 0)
+            if ch == 10
+                done = 1
+            elsif ch != 13
+                acc = acc + char_to_str(ch)
+    acc
+
+# 0 rechazar, 1 una vez, 2 siempre.
+fn perm_reply_word(w: String) -> Int ! alloc
+    t = sk_lower(sk_trim(w))
+    if str_eq(t, "once") != 0
+        return 1
+    if str_eq(t, "y") != 0
+        return 1
+    if str_eq(t, "yes") != 0
+        return 1
+    if str_eq(t, "s") != 0
+        return 1
+    if str_eq(t, "si") != 0
+        return 1
+    if str_eq(t, "always") != 0
+        return 2
+    if str_eq(t, "a") != 0
+        return 2
+    0
+
+fn perm_ask_json(c: Int, kind: String, title: String, input_json: String) -> Int ! io, alloc
+    id = "perm_" + int_to_str(ctx_next_call(c))
+    x = ev_permission(c, id, ctx_call(c), kind, title, input_json)
+    result = 0
+    done = 0
+    while done == 0
+        line = perm_read_line()
+        if str_eq(line, char_to_str(4)) != 0
+            done = 1
+        else
+            d = json_parse(line)
+            if json_ok(d) != 0
+                r = json_root(d)
+                if str_eq(json_get_str(d, r, "type"), "permission_reply") != 0
+                    rid = json_get_str(d, r, "id")
+                    if str_len(rid) == 0
+                        result = perm_reply_word(json_get_str(d, r, "reply"))
+                        done = 1
+                    elsif str_eq(rid, id) != 0
+                        result = perm_reply_word(json_get_str(d, r, "reply"))
+                        done = 1
+    result
+
+fn perm_ask_text(c: Int, title: String) -> Int ! io, alloc
+    x = write_str_fd(2, "Allow " + title + "? [y]es / [a]lways / [N]o: ")
+    line = perm_read_line()
+    if str_eq(line, char_to_str(4)) != 0
+        return 0
+    perm_reply_word(line)
+
+# Pregunta al cliente: 0 rechazar, 1 una vez, 2 siempre (también lo usan los subagentes).
+fn perm_ask(c: Int, kind: String, title: String, input_json: String) -> Int ! io, alloc
+    if ctx_out(c) == 1
+        return perm_ask_json(c, kind, title, input_json)
+    perm_ask_text(c, title)
+
+# 1 si se concede el permiso (tras preguntar si hace falta), 0 si no.
+fn perm_resolve(c: Int, kind: String, subject: String, title: String, input_json: String) -> Int ! io, alloc
+    if perm_granted(c, kind, subject) != 0
+        return 1
+    if ctx_yes(c) != 0
+        return 1
+    if ctx_interactive(c) == 0
+        return 0
+    reply = perm_ask(c, kind, title, input_json)
+    if reply == 2
+        x = perm_grant(c, kind, subject)
+        return 1
+    if reply == 1
+        return 1
+    0
+
+# Mensaje de error para el modelo, o "" si se concede.
+fn perm_gate(c: Int, kind: String, subject: String, input_json: String) -> String ! io, alloc
+    dec = perm_decide(c, kind, subject)
+    if dec == 0
+        return ""
+    title = kind + ": " + subject
+    if dec == 2
+        return "Permission denied by the permission rules: " + title + ". Do not retry this call; choose another approach or tell the user."
+    if perm_resolve(c, kind, subject, title, input_json) != 0
+        return ""
+    if ctx_interactive(c) != 0
+        return "The user rejected permission for " + title + ". Do not retry the same call; ask the user how to proceed or choose another approach."
+    "Permission required for " + title + " but no user is available to approve it. It can be allowed with --yes or with the \"permission\" section of supercoder.json."
+
+# Categoría de permiso de una herramienta ("" = sin control).
+fn perm_kind(canon: String) -> String ! alloc
+    if str_eq(canon, "bash") != 0
+        return "bash"
+    if str_eq(canon, "write") != 0
+        return "edit"
+    if str_eq(canon, "edit") != 0
+        return "edit"
+    if str_eq(canon, "read") != 0
+        return "read"
+    if str_eq(canon, "list") != 0
+        return "read"
+    if str_eq(canon, "glob") != 0
+        return "read"
+    if str_eq(canon, "grep") != 0
+        return "read"
+    if str_eq(canon, "task") != 0
+        return "task"
+    if str_eq(canon, "skill") != 0
+        return "skill"
+    ""
+
+# 1 si la ruta absoluta está fuera del directorio de trabajo.
+fn perm_outside(path: String) -> Int ! io, alloc
+    root = cwd_path()
+    if str_eq(path, root) != 0
+        return 0
+    if sk_starts_with(path, root + "/") != 0
+        return 0
+    1
+
+# Comprueba el permiso de una llamada ya validada. "" si puede ejecutarse; si no, el motivo.
+fn perm_check(c: Int, canon: String, d: Int, a: Int) -> String ! io, alloc
+    kind = perm_kind(canon)
+    if str_len(kind) == 0
+        return ""
+    input_json = json_dump(d, a)
+    subject = ""
+    if str_eq(kind, "bash") != 0
+        subject = arg_str(d, a, "command,cmd,script", "")
+    elsif str_eq(kind, "task") != 0
+        subject = arg_str(d, a, "subagent_type,agent", "")
+    elsif str_eq(kind, "skill") != 0
+        subject = arg_str(d, a, "name", "")
+    else
+        raw = arg_str(d, a, "filePath,file_path,path,file,directory", "")
+        subject = path_abs(raw)
+        if perm_outside(subject) != 0
+            ext = perm_gate(c, "external_directory", subject, input_json)
+            if str_len(ext) > 0
+                return ext
+    perm_gate(c, kind, subject, input_json)

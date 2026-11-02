@@ -1,0 +1,48 @@
+# Herramienta bash: ejecuta un comando de shell con plazo y salida acotada.
+
+import "salkit/proc.sal"
+import "salkit/fsx.sal"
+import "salkit/strbuf.sal"
+import "src/tools/common.sal"
+import "src/agent/ctx.sal"
+import "src/util.sal"
+
+fn bash_default_timeout() -> Int
+    120000
+
+fn bash_max_timeout() -> Int
+    600000
+
+fn bash_max_output() -> Int
+    30000
+
+fn tool_bash(c: Int, d: Int, a: Int) -> Int ! io, alloc
+    cmd = arg_str(d, a, "command,cmd,script", "")
+    if str_len(sk_trim(cmd)) == 0
+        return tr_err("command must not be empty")
+    timeout = arg_int(d, a, "timeout,timeout_ms", bash_default_timeout())
+    if timeout < 1000
+        timeout = bash_default_timeout()
+    if timeout > bash_max_timeout()
+        timeout = bash_max_timeout()
+    workdir = arg_str(d, a, "workdir,cwd,dir", "")
+    wd = ""
+    if str_len(workdir) > 0
+        wd = path_abs(workdir)
+        if fsx_is_dir(wd) == 0
+            return tr_err("workdir does not exist: " + wd)
+    shell = ctx_shell(c)
+    if str_len(shell) == 0
+        shell = "/bin/sh"
+    r = proc_sh(shell, cmd, wd, timeout, bash_max_output())
+    out = proc_output(r)
+    title = arg_str(d, a, "description", "")
+    if str_len(title) == 0
+        title = sk_truncate_middle(cmd, 60)
+    if proc_timed_out(r) != 0
+        return tr_err(out + char_to_str(10) + "[command timed out after " + int_to_str(timeout) + " ms and was killed]")
+    if proc_exit(r) != 0
+        return tr_ok(out + char_to_str(10) + "[exit code " + int_to_str(proc_exit(r)) + "]", title)
+    if str_len(out) == 0
+        out = "(no output)"
+    tr_ok(out, title)

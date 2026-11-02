@@ -26,7 +26,7 @@ Sobre `DIR`:
 3. `validar_copia` escribe `DIR/verificado` con `ok\n`. `promover_base` escribe `DIR/promovido` con `1\n`. Esas dos escrituras ocurren aunque el recuento sea bajo.
 4. Sale 0 si al menos 5 pasos devolvieron 0. Sale 1 en caso contrario.
 
-`ejecutor_run` hace spawn de `/bin/supercoder` con argumentos `run`, `--format`, `json` y el prompt (`tarea` en la campaña). stdin/stdout/stderr son 0/1/2. El prompt del paso no sale de un banco de casos: es el literal `tarea`.
+`ejecutor_run` hace spawn de `/bin/supercoder` con argumentos `run`, `--format`, `json`, `--yes` y el prompt (sin cliente al que preguntar, los permisos `ask` se aprueban) (`tarea` en la campaña). stdin/stdout/stderr son 0/1/2. El prompt del paso no sale de un banco de casos: es el literal `tarea`.
 
 En el host Linux el binario de prueba es `out/linux/bin/supercoder`. `/bin/supercoder` y `/bin/sosh` son rutas del guest.
 

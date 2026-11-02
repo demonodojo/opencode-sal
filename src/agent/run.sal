@@ -1,0 +1,96 @@
+# `supercoder run`: prepara el contexto y ejecuta el agente.
+
+import "salkit/fsx.sal"
+import "salkit/strbuf.sal"
+import "src/agent/attach.sal"
+import "src/agent/ctx.sal"
+import "src/agent/loop.sal"
+import "src/agent/messages.sal"
+import "src/agent/prompt.sal"
+import "src/agents.sal"
+import "src/config.sal"
+import "src/events.sal"
+import "src/provider/claude.sal"
+import "src/session.sal"
+import "src/tools/registry.sal"
+import "src/tools/todo.sal"
+import "src/perm.sal"
+
+# Texto plano del historial para el proveedor claude (que no recibe mensajes JSON).
+fn history_as_text(msgs: Int) -> String ! alloc
+    out = ""
+    n = sk_sl_len(msgs)
+    i = 0
+    while i < n
+        d = json_parse(sk_sl_get(msgs, i))
+        r = json_root(d)
+        role = json_get_str(d, r, "role")
+        content = json_get_str(d, r, "content")
+        if str_len(content) > 0
+            if str_eq(role, "user") != 0
+                out = out + "User: " + content + char_to_str(10)
+            elsif str_eq(role, "assistant") != 0
+                out = out + "Assistant: " + content + char_to_str(10)
+        i = i + 1
+    if str_len(out) > 6000
+        out = str_slice(out, str_len(out) - 6000, str_len(out))
+    out
+
+# `claude -p` gestiona sus propias herramientas: aquí solo se pasa el prompt y se emite la respuesta.
+fn run_claude(c: Int, prompt: String, files: String) -> Int ! io, alloc
+    x = ev_step_start(c)
+    ctxt = history_as_text(ctx_msgs(c))
+    full = str_slice(prompt, 0, str_len(prompt))
+    if str_len(sk_trim(files)) > 0
+        full = full + char_to_str(10) + char_to_str(10) + "Attached files (read them with your Read tool):" + char_to_str(10) + sk_join(sk_split_lines(sk_trim(files)), char_to_str(10))
+    if str_len(ctxt) > 0
+        full = "Previous conversation:" + char_to_str(10) + ctxt + char_to_str(10) + "Current request: " + full
+    txt = claude_run(ctx_model(c), full)
+    if str_len(txt) == 0
+        x = ev_error(c, "claude -p returned no response")
+        x = ev_step_finish(c, "error", 0, 0)
+        return 1
+    x = ev_text(c, txt)
+    x = sk_sl_push(ctx_msgs(c), msg_user(prompt))
+    x = sk_sl_push(ctx_msgs(c), msg_assistant(txt, 0 - 1))
+    x = ev_step_finish(c, "stop", 0, 0)
+    x = session_save(ctx_session(c), ctx_msgs(c))
+    0
+
+# Opciones de ejecución: vec [out, max_turns, session, cont, model, agent, interactive, yes].
+fn run_agent(prompt: String, out_mode: Int, max_turns: Int, session_id: String, cont: Int, model_flag: String, agent_name: String, interactive: Int, yes: Int, depth: Int, files: String) -> Int ! io, alloc
+    c = ctx_new()
+    cfg = cfg_load()
+    x = ctx_set_cfg(c, cfg)
+    x = ctx_set_out(c, out_mode)
+    x = ctx_set_max_turns(c, max_turns)
+    x = ctx_set_session(c, session_id)
+    x = ctx_set_agent(c, agent_name)
+    x = ctx_set_interactive(c, interactive)
+    x = ctx_set_yes(c, yes)
+    ag = agent_find(agent_name)
+    if ag < 0
+        x = ev_error(c, "Unknown agent '" + agent_name + "'. Available agents:" + char_to_str(10) + agents_describe(0))
+        return 2
+    x = ctx_set_depth(c, depth)
+    x = ctx_set_allow(c, ag_allow(ag))
+    x = ctx_set_agent_perm(c, ag_perm(ag))
+    flag = model_flag
+    if str_len(flag) == 0
+        flag = ag_model(ag)
+    model = cfg_model_for(cfg, flag)
+    x = ctx_set_model(c, model)
+    x = ctx_set_shell(c, cfg_shell(cfg))
+    x = ctx_set_vision(c, cfg_vision(cfg, model))
+    msgs = sk_sl_new()
+    if cont != 0
+        msgs = session_load(session_id)
+    x = ctx_set_msgs(c, msgs)
+    x = perm_grants_load(c)
+    x = todos_load(c)
+    if cfg_is_claude(cfg, model) != 0
+        return run_claude(c, prompt, files)
+    x = ctx_set_system(c, prompt_build(c, ag_prompt(ag)))
+    x = ctx_set_tools(c, tools_defs_depth(ctx_allow(c), depth))
+    x = sk_sl_push(ctx_msgs(c), attach_user_message(c, prompt, files))
+    agent_loop(c)

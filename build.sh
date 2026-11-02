@@ -10,9 +10,8 @@ sdk="$soso/target/sal/sdk"
 lld=$(rustc --print sysroot)/lib/rustlib/x86_64-unknown-linux-gnu/bin/rust-lld
 mkdir -p "$root/out/bin" "$root/out/linux/bin"
 export SAL_SDK="$sdk" SAL_LD="$lld"
-# import "io/…" se resuelve en sal_modules/ del proyecto, no en la ruta de instalación.
-mkdir -p "$root/sal_modules"
-ln -sfn "$root/../sal/std/io" "$root/sal_modules/io"
+# Enlaza sal_modules/io (std) y sal_modules/salkit según Sal.toml.
+(cd "$root" && "$sal" install)
 
 build_one() {
   local target=$1

@@ -5,8 +5,8 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 sal_root=${SAL_ROOT:-"$root/../sal"}
 soso_root=${SOSO_ROOT:-"$root/../soso"}
 
-if [[ ! -d "$sal_root" || ! -d "$soso_root" ]]; then
-  echo "release-build: faltan repos hermanos sal/ y soso/ (SAL_ROOT, SOSO_ROOT)" >&2
+if [[ ! -d "$sal_root" || ! -d "$soso_root" || ! -d "$root/../salkit" ]]; then
+  echo "release-build: faltan repos hermanos sal/, soso/ y salkit/ (SAL_ROOT, SOSO_ROOT)" >&2
   exit 1
 fi
 

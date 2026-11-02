@@ -17,11 +17,12 @@ Reimplementación compatible de SuperCoder en Sal. Decisión D12 en el repo herm
 |------|--------|
 | `src/main.sal` | CLI `supercoder` |
 | `src/coord_main.sal` | CLI `soso-improve-sal` |
-| `src/*.sal` | Bucle, HTTP, JSON, herramientas, sesión, skills |
+| `src/agent/`, `src/provider/`, `src/tools/`, `src/*.sal` | Bucle, proveedores, herramientas, permisos, agentes, sesión, skills |
 | `src/coord/*.sal` | Campaña: captura, ejecutor, validador |
 | `out/bin/` | ELF guest (`--target soso`) |
 | `out/linux/bin/` | Binarios Linux (`--target linux`) |
-| `tests/` | Mock HTTP y humo |
+| `sal_modules/` | Enlaces creados por `sal install` (`io`, `salkit`); no se versiona |
+| `tests/` | Unitarios `tests/sal`, mock `mock_llm.py`, guiones y E2E |
 
 `target/` y `src/target/` son caché del compilador.
 
@@ -29,14 +30,14 @@ El agente (`supercoder run`, herramientas, eventos) está en [supercoder-sal-age
 
 ## Build
 
-Hace falta `sal` en PATH o `../sal/target/release/sal`. El destino guest necesita el SDK del repo `soso`:
+Hace falta el repo hermano `../salkit` (dependencia `path` de `Sal.toml`; JSON, regex, glob, HTTP, procesos) y `sal` en PATH o `../sal/target/release/sal`. El destino guest necesita el SDK del repo `soso`:
 
 ```bash
 cargo xtask sal-build --cross-only   # en ../soso, una vez
 ./build.sh                            # en este repo
 ```
 
-`build.sh` compila `src/main.sal` y `src/coord_main.sal`. El guest usa `SAL_SDK` (`$SOSO_ROOT/target/sal/sdk`) y `rust-lld`. El destino Linux se compila después, sin `SAL_SDK`. Variables: `SOSO_ROOT` (default `../soso`), `SAL_BIN`.
+`build.sh` ejecuta `sal install` (enlaza `sal_modules/io` y `sal_modules/salkit`) y compila `src/main.sal` y `src/coord_main.sal`. El guest usa `SAL_SDK` (`$SOSO_ROOT/target/sal/sdk`) y `rust-lld`. El destino Linux se compila después, sin `SAL_SDK`. Variables: `SOSO_ROOT` (default `../soso`), `SAL_BIN`.
 
 Instalación en el guest, desde el monorepo soso:
 
@@ -47,20 +48,22 @@ soso-pkg instalar supercoder-sal
 
 ## Pruebas
 
-Las pruebas HTTP hablan con el mock local. No llaman a `soso-llm` ni a un modelo real.
+Las pruebas hablan con el mock local (`tests/mock_llm.py`); no llaman a `soso-llm` ni a un modelo real.
 
 ```bash
-./tests/probar_http.sh
-python3 tests/mock_http_server.py 7422          # read, luego content
-python3 tests/mock_http_server.py 7422 edit     # read, edit, content
-out/linux/bin/supercoder run --format json --max-turns 1 "prompt"
+tests/probar_sal.sh                 # unitarios tests/sal/test_*.sal
+OC_SAL_E2E=1 tests/probar_sal.sh    # + E2E con el binario linux (hay que ejecutar ./build.sh antes)
+./tests/probar_http.sh              # build + unitarios + E2E
+./tests/probar_tui.sh               # TUI con permiso interactivo
+python3 tests/mock_llm.py 7422 tests/guiones/read_edit_stop.json
+cd vscode && npm test               # extensión
 ```
 
-El mock escucha en `127.0.0.1`, atiende una conexión por respuesta y cierra. Puerto por defecto `7422`. `probar_http.sh` construye, arranca el mock, imprime `--version` y las cinco primeras líneas de `run --format json`. `probar_tui.sh` prueba la sesión sin argumentos.
+Los E2E usan `SUPERCODER_HOME` y `SOSO_LLM_API_KEY=test-key`. El mock sirve SSE o JSON según `stream` de la petición; pasos: `tool_calls` (con `fragments` para trocear argumentos), `content` (con `deltas`), `error` con `status`. Los unitarios escriben bajo `target/*test` (el script los limpia). Los de salkit: `cd ../salkit && sal install && sal test`.
 
 ## CI y release
 
-- [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml): en cada PR/push a `main`, checkout de `demonodojo/sal` y `demonodojo/soso`, `scripts/release-build.sh`, `probar_http.sh` y `probar_tui.sh`.
+- [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml): en cada PR/push a `main`, checkout de `demonodojo/sal`, `demonodojo/salkit` y `demonodojo/soso`, `scripts/release-build.sh`, `probar_http.sh` y `probar_tui.sh`.
 - Publicar versión nueva: skill [supercoder-sal-release](../supercoder-sal-release/SKILL.md) (tag, Release, artefactos).
 
 ## Fuentes `.sal`

@@ -1,0 +1,53 @@
+# Constructores de mensajes del protocolo OpenAI chat/completions (JSON como texto).
+# Una "llamada" es un vec [id, name, arguments] con arguments como texto JSON.
+
+import "salkit/json.sal"
+import "salkit/strbuf.sal"
+
+fn msg_system(text: String) -> String ! alloc
+    jb_obj(jb_kv("role", json_quote("system")) + "," + jb_kv("content", json_quote(text)))
+
+fn msg_user(text: String) -> String ! alloc
+    jb_obj(jb_kv("role", json_quote("user")) + "," + jb_kv("content", json_quote(text)))
+
+# Mensaje de usuario con partes (texto + imágenes); `parts_json` es un array JSON.
+fn msg_user_parts(parts_json: String) -> String ! alloc
+    jb_obj(jb_kv("role", json_quote("user")) + "," + jb_kv("content", parts_json))
+
+fn msg_tool(call_id: String, content: String) -> String ! alloc
+    jb_obj(jb_kv("role", json_quote("tool")) + "," + jb_kv("tool_call_id", json_quote(call_id)) + "," + jb_kv("content", json_quote(content)))
+
+fn call_new(id: String, name: String, args: String) -> Int ! alloc
+    c = vec_new()
+    x = vec_push(c, str_as_int(id))
+    x = vec_push(c, str_as_int(name))
+    x = vec_push(c, str_as_int(args))
+    c
+
+fn call_id(c: Int) -> String
+    str_from_int(vec_get(c, 0))
+
+fn call_name(c: Int) -> String
+    str_from_int(vec_get(c, 1))
+
+fn call_args(c: Int) -> String
+    str_from_int(vec_get(c, 2))
+
+fn call_json(c: Int) -> String ! alloc
+    fn_part = jb_obj(jb_kv("name", json_quote(call_name(c))) + "," + jb_kv("arguments", json_quote(call_args(c))))
+    jb_obj(jb_kv("id", json_quote(call_id(c))) + "," + jb_kv("type", json_quote("function")) + "," + jb_kv("function", fn_part))
+
+# Mensaje del asistente. Sin llamadas (`calls` = -1 o vacío) lleva solo texto.
+fn msg_assistant(text: String, calls: Int) -> String ! alloc
+    base = jb_kv("role", json_quote("assistant")) + "," + jb_kv("content", json_quote(text))
+    if calls < 0
+        return jb_obj(base)
+    n = vec_len(calls)
+    if n == 0
+        return jb_obj(base)
+    items = sk_sl_new()
+    i = 0
+    while i < n
+        x = sk_sl_push(items, call_json(vec_get(calls, i)))
+        i = i + 1
+    jb_obj(base + "," + jb_kv("tool_calls", jb_arr(jb_join(items))))

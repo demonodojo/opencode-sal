@@ -1,0 +1,110 @@
+# Herramienta grep: búsqueda de expresiones regulares en ficheros.
+
+import "salkit/fsx.sal"
+import "salkit/glob.sal"
+import "salkit/regex.sal"
+import "salkit/strbuf.sal"
+import "src/tools/common.sal"
+import "src/util.sal"
+
+# Busca en un fichero y añade líneas "ruta:número: texto" a `out`.
+# `st` es un vec [coincidencias, ficheros con coincidencias].
+fn grep_file(out: Int, st: Int, re: Int, lit: String, use_lit: Int, display: String, text: String) -> Int ! alloc
+    n = str_len(text)
+    pos = 0
+    line = 1
+    hit_file = 0
+    while pos < n
+        e = sk_index_from(text, "\n", pos)
+        if e < 0
+            e = n
+        cand = 1
+        if use_lit != 0
+            cand = 0
+            if sk_index_from(text, lit, pos) >= 0
+                if sk_index_from(text, lit, pos) + str_len(lit) <= e
+                    cand = 1
+        else
+            cand = regex_prefilter(re, text, pos, e)
+        if cand != 0
+            ln = str_slice(text, pos, e)
+            hit = 0
+            if use_lit != 0
+                hit = 1
+            else
+                hit = regex_test(re, ln)
+            if hit != 0
+                if vec_get(st, 0) < 100
+                    if str_len(ln) > 300
+                        ln = str_slice(ln, 0, 300) + "..."
+                    x = sk_sl_push(out, display + ":" + int_to_str(line) + ": " + ln)
+                x = vec_set(st, 0, vec_get(st, 0) + 1)
+                hit_file = 1
+        line = line + 1
+        pos = e + 1
+    if hit_file != 0
+        x = vec_set(st, 1, vec_get(st, 1) + 1)
+    0
+
+fn tool_grep(c: Int, d: Int, a: Int) -> Int ! io, alloc
+    pattern = arg_str(d, a, "pattern,regex,query", "")
+    if str_len(pattern) == 0
+        return tr_err("pattern must not be empty")
+    raw = arg_str(d, a, "path,dir,directory", ".")
+    include = arg_str(d, a, "include,glob,filePattern", "")
+    icase = arg_bool(d, a, "ignoreCase,ignore_case,caseInsensitive", 0)
+    root = path_abs(raw)
+    if fsx_exists(root) == 0
+        return tr_err("Path not found: " + root)
+    re = regex_compile(pattern, icase)
+    if regex_ok(re) == 0
+        return tr_err("Invalid regular expression: " + regex_error(re))
+    use_lit = 0
+    if icase == 0
+        if regex_is_literal(pattern) != 0
+            use_lit = 1
+    out = sk_sl_new()
+    st = vec_new()
+    x = vec_push(st, 0)
+    x = vec_push(st, 0)
+    cwd = cwd_path()
+    if fsx_is_dir(root) == 0
+        text = fsx_read_text_max(root, 2097152)
+        if looks_binary(text) == 0
+            x = grep_file(out, st, re, pattern, use_lit, path_rel(cwd, root), text)
+    else
+        files = fsx_walk(root, default_ignores(), 50000)
+        n = sk_sl_len(files)
+        i = 0
+        while i < n
+            rel = sk_sl_get(files, i)
+            take = 1
+            if str_len(include) > 0
+                take = glob_match_name(include, rel)
+            if take != 0
+                full = root + "/" + rel
+                if fsx_size(full) <= 2097152
+                    text = fsx_read_text_max(full, 2097152)
+                    if looks_binary(text) == 0
+                        x = grep_file(out, st, re, pattern, use_lit, path_rel(cwd, full), text)
+            i = i + 1
+    total = vec_get(st, 0)
+    if total == 0
+        return tr_ok("No matches found", pattern)
+    head = "Found " + int_to_str(total) + " match" + plural_es(total) + " in " + int_to_str(vec_get(st, 1)) + " file" + plural_s(vec_get(st, 1)) + char_to_str(10)
+    body = head + sk_join(out, char_to_str(10))
+    if total > 100
+        body = body + char_to_str(10) + "(Results truncated: showing 100 of " + int_to_str(total) + " matches. Narrow the search with path or include.)"
+    tr_ok(body, pattern)
+
+fn plural_es(n: Int) -> String
+    if n == 1
+        ""
+    else
+        "es"
+
+fn plural_s(n: Int) -> String
+    if n == 1
+        ""
+    else
+        "s"
