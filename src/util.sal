@@ -56,12 +56,36 @@ fn path_push(stack: Int, top: Int, s: String) -> Int
         x = vec_push(stack, str_as_int(s))
     top + 1
 
-# Ruta absoluta y normalizada (las relativas parten del directorio actual).
+# Directorio del usuario ($HOME), sin barra final; "" si no está definido.
+fn home_dir() -> String ! io, alloc
+    h = getenv("HOME")
+    if str_len(h) > 1
+        if str_char(h, str_len(h) - 1) == 47
+            return str_slice(h, 0, str_len(h) - 1)
+    str_slice(h, 0, str_len(h))
+
+# Ruta absoluta y normalizada (las relativas parten del directorio actual; "~" es el $HOME).
 fn path_abs(p: String) -> String ! io, alloc
     if str_len(p) > 0
         if str_char(p, 0) == 47
             return path_norm(p)
+        if str_char(p, 0) == 126
+            home = home_dir()
+            if str_len(home) > 0
+                if str_len(p) == 1
+                    return path_norm(home)
+                if str_char(p, 1) == 47
+                    return path_norm(home + str_slice(p, 1, str_len(p)))
     path_norm(cwd_path() + "/" + p)
+
+# Directorio padre de una ruta absoluta ("/" si ya es la raíz).
+fn path_dirname(p: String) -> String ! alloc
+    i = str_len(p) - 1
+    while i > 0
+        if str_char(p, i) == 47
+            return str_slice(p, 0, i)
+        i = i - 1
+    "/"
 
 # Ruta relativa a `root` si cuelga de él; si no, la misma ruta.
 fn path_rel(root: String, p: String) -> String ! alloc

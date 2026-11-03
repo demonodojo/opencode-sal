@@ -11,6 +11,10 @@ fn tool_write(c: Int, d: Int, a: Int) -> Int ! io, alloc
     if fsx_is_dir(path) != 0
         return tr_err("Cannot write: " + path + " is a directory")
     existed = fsx_exists(path)
+    if existed != 0
+        if fsx_size(path) == str_len(content)
+            if str_eq(fsx_read_text(path), content) != 0
+                return tr_ok(path + " already has exactly this content; nothing was written.", path_rel(cwd_path(), path))
     if fsx_write(path, content) != 0
         return tr_err("Could not write " + path)
     verb = "Created"

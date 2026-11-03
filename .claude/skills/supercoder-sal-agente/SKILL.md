@@ -22,6 +22,8 @@ supercoder run [--format json] [--session ID] [--continue] [--max-turns N]
                [--file RUTA]... [--] PROMPT
 supercoder session list
 supercoder agents
+supercoder skills                           # skills descubiertos (proyecto y usuario)
+supercoder tool NOMBRE JSON [--yes]         # ejecuta una herramienta sin modelo: depurar y probar
 supercoder --version | reinstalar
 ```
 
@@ -42,10 +44,10 @@ supercoder --version | reinstalar
 | `agent/child.sal` | Proceso hijo con pipes (task y TUI) |
 | `provider/openai.sal` | `/v1/chat/completions` con `tools`, Bearer, streaming SSE opcional |
 | `provider/claude.sal` | `claude -p` |
-| `tools/*.sal` | `read write edit list glob grep bash todo task`; `names.sal` alias; `registry.sal` esquemas, validación y despacho |
+| `tools/*.sal` | `read write edit multiedit list glob grep bash todo task`; `names.sal` alias; `registry.sal` esquemas, validación y despacho |
 | `perm.sal` | allow/ask/deny, `permission_request`, grants «always» |
 | `agents.sal` | build, plan, general, explore + `.supercoder|.opencode|.claude/agents/*.md` |
-| `skills.sal` | `SKILL.md` descubiertos y herramienta `skill` |
+| `skills.sal` | `SKILL.md` de proyecto (cwd y ascendientes hasta `.git`) y de usuario (`~/.supercoder`, `~/.config/opencode`, `~/.claude`), herramienta `skill`, `/nombre args` del usuario, `disable-model-invocation` |
 | `events.sal`, `session.sal`, `config.sal`, `tui.sal`, `util.sal` | Eventos, sesiones, configuración, TUI, rutas y fechas |
 
 ## Un turno
@@ -75,6 +77,15 @@ Reglas de `"permission"` en `supercoder.json` y del agente (`allow|ask|deny`; en
 ## Convenciones de Sal que importan aquí
 
 Sin structs multicampo: asas `vec` y accesores. Cada función con efectos propios los declara. Los nombres de módulos importados se aplanan: prefijar. Las cadenas se mueven al asignar (copiar con `str_slice(s, 0, str_len(s))`). `on` y `from` están reservadas. `{{`/`}}` para llaves literales. La memoria no se libera: acumular con `x = x + …`.
+
+## Skills y herramientas: detalles que pesan
+
+- Un skill cargado entrega cuerpo + directorio base + ficheros acompañantes; `perm_outside` no pide permiso para leer bajo un directorio de skills (`skills_path_ok`).
+- `fm_parse` entiende bloques `>`, `>-`, `|`; las descripciones largas se recortan a 240 caracteres y el listado a unos 6000.
+- `grep` con un literal salta de coincidencia en coincidencia (no relee el fichero por línea); `context` produce grupos `ruta-N- texto` separados por `--`.
+- `edit`/`multiedit` comparten `edit_apply`: CRLF se conserva, y si `oldString` falla se indica dónde aparece su primera línea.
+- `bash` envuelve el script con `trap … EXIT` para leer el código de salida y dejar de leer cuando el shell termina aunque un hijo en segundo plano mantenga la tubería (no en `sosh`).
+- `perm_bash_readonly` es una lista corta: `git branch/tag/remote` solo sin argumentos de escritura, nada con `--output`, `sort -o`, redirecciones o sustituciones.
 
 ## Pruebas
 

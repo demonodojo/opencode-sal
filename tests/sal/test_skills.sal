@@ -1,0 +1,54 @@
+import "../../src/skills.sal"
+import "../../src/tools/common.sal"
+import "../../src/util.sal"
+import "salkit/fsx.sal"
+import "salkit/json.sal"
+import "support/assert.sal"
+
+fn main() -> Int ! io, alloc
+    f = 0
+    nl = char_to_str(10)
+    base = "target/skilltest/demo"
+    w = fsx_write(base + "/SKILL.md", "---" + nl + "name: demo" + nl + "description: >-" + nl + "  Does a demo" + nl + "  of things." + nl + "---" + nl + "Step one for $ARGUMENTS." + nl)
+    w2 = fsx_write(base + "/scripts/run.sh", "echo hi" + nl)
+    out = skill_render("demo", base + "/SKILL.md", "the build")
+    f = f + ck_contains(out, "<skill_content name=\"demo\">", 1)
+    f = f + ck_contains(out, "Step one for the build.", 2)
+    f = f + ck_contains(out, "Base directory for this skill: " + path_abs(base), 3)
+    f = f + ck_contains(out, "scripts/run.sh</file>", 4)
+    f = f + ck_int(sk_contains(out, "$ARGUMENTS"), 0, 5)
+
+    # sin $ARGUMENTS en el cuerpo, los argumentos se añaden al final
+    w3 = fsx_write("target/skilltest/plain/SKILL.md", "---" + nl + "name: plain" + nl + "---" + nl + "Just do it." + nl)
+    out2 = skill_render("plain", "target/skilltest/plain/SKILL.md", "extra args")
+    f = f + ck_contains(out2, "ARGUMENTS: extra args", 6)
+
+    # los skills del propio repositorio (.claude/skills) se descubren, también los de bloque ">-"
+    all = skills_scan()
+    f = f + ck_int(sk_sl_len(all) >= 4, 1, 10)
+    e = skill_find("supercoder-sal-dev", 1)
+    f = f + ck_int(str_len(e) > 0, 1, 11)
+    f = f + ck_int(str_len(skill_entry_desc(e)) > 20, 1, 12)
+    f = f + ck_int(sk_starts_with(skill_entry_desc(e), ">") , 0, 13)
+    f = f + ck_int(str_len(skill_find("no-such-skill", 0)), 0, 14)
+    f = f + ck_contains(skills_prompt(), "- supercoder-sal-dev: ", 15)
+
+    # /nombre al principio del prompt carga el skill; lo demás no cambia
+    ex = skill_expand_prompt("/supercoder-sal-dev compila")
+    f = f + ck_contains(ex, "The user invoked the skill \"supercoder-sal-dev\"", 20)
+    f = f + ck_contains(ex, "ARGUMENTS: compila", 21)
+    f = f + ck_str(skill_expand_prompt("/no-such-skill x"), "/no-such-skill x", 22)
+    f = f + ck_str(skill_expand_prompt("hola /supercoder-sal-dev"), "hola /supercoder-sal-dev", 23)
+    f = f + ck_str(skill_expand_prompt("/"), "/", 24)
+
+    d = json_parse("{{\"name\":\"no-such-skill\"}}")
+    r = tool_skill(0, d, json_root(d))
+    f = f + ck_int(tr_failed(r), 1, 30)
+    f = f + ck_contains(tr_output(r), "Available skills:", 31)
+
+    # los ficheros de un skill del usuario no cuentan como directorio externo
+    home = home_dir()
+    if str_len(home) > 0
+        f = f + ck_int(skills_path_ok(home + "/.claude/skills/x/SKILL.md"), 1, 40)
+    f = f + ck_int(skills_path_ok("/etc/passwd"), 0, 41)
+    f

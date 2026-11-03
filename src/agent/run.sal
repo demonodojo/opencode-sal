@@ -1,5 +1,6 @@
 # `supercoder run`: prepara el contexto y ejecuta el agente.
 
+import "io/io.sal"
 import "salkit/fsx.sal"
 import "salkit/strbuf.sal"
 import "src/agent/attach.sal"
@@ -12,9 +13,11 @@ import "src/config.sal"
 import "src/events.sal"
 import "src/provider/claude.sal"
 import "src/session.sal"
+import "src/skills.sal"
 import "src/tools/registry.sal"
 import "src/tools/todo.sal"
 import "src/perm.sal"
+import "src/tools/common.sal"
 
 # Texto plano del historial para el proveedor claude (que no recibe mensajes JSON).
 fn history_as_text(msgs: Int) -> String ! alloc
@@ -92,5 +95,29 @@ fn run_agent(prompt: String, out_mode: Int, max_turns: Int, session_id: String, 
         return run_claude(c, prompt, files)
     x = ctx_set_system(c, prompt_build(c, ag_prompt(ag)))
     x = ctx_set_tools(c, tools_defs_depth(ctx_allow(c), depth))
-    x = sk_sl_push(ctx_msgs(c), attach_user_message(c, prompt, files))
+    x = sk_sl_push(ctx_msgs(c), attach_user_message(c, skill_expand_prompt(prompt), files))
     agent_loop(c)
+
+# `supercoder tool NOMBRE JSON`: ejecuta una herramienta sin modelo (depuración y pruebas).
+# Escribe la salida por stdout y devuelve 0 si fue bien, 1 si la herramienta falló.
+fn run_tool(name: String, args: String, yes: Int) -> Int ! io, alloc
+    c = ctx_new()
+    cfg = cfg_load()
+    x = ctx_set_cfg(c, cfg)
+    x = ctx_set_out(c, 0)
+    x = ctx_set_session(c, "tool")
+    x = ctx_set_agent(c, "build")
+    x = ctx_set_yes(c, yes)
+    ag = agent_find("build")
+    x = ctx_set_allow(c, ag_allow(ag))
+    x = ctx_set_agent_perm(c, ag_perm(ag))
+    model = cfg_model_for(cfg, "")
+    x = ctx_set_model(c, model)
+    x = ctx_set_shell(c, cfg_shell(cfg))
+    x = ctx_set_vision(c, cfg_vision(cfg, model))
+    x = ctx_set_msgs(c, sk_sl_new())
+    x = perm_grants_load(c)
+    x = todos_load(c)
+    res = tool_exec(c, name, args)
+    w = write_str_fd(1, tr_output(res) + char_to_str(10))
+    tr_failed(res)

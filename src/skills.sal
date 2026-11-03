@@ -1,6 +1,12 @@
 # Skills: instrucciones especializadas en <dir>/<nombre>/SKILL.md con frontmatter
-# (name, description). Se buscan en .supercoder/skills, .opencode/skills y .claude/skills; la
-# primera con un nombre gana. El prompt lista los nombres y la herramienta `skill` carga el cuerpo.
+# (name, description, disable-model-invocation).
+#
+# Dónde se buscan, de mayor a menor prioridad (la primera con un nombre gana):
+#   1. el directorio de trabajo y sus ascendientes hasta la raíz del repositorio (.git):
+#      .supercoder/skills, .opencode/skills, .claude/skills
+#   2. el directorio del usuario: ~/.supercoder/skills, ~/.config/opencode/skills, ~/.claude/skills
+# El prompt lista los nombres con su descripción y la herramienta `skill` carga el cuerpo.
+# El usuario también puede invocar un skill escribiendo `/nombre argumentos` al principio del prompt.
 
 import "salkit/fsx.sal"
 import "salkit/strbuf.sal"
@@ -8,14 +14,55 @@ import "salkit/frontmatter.sal"
 import "src/tools/common.sal"
 import "src/util.sal"
 
-fn skills_dirs() -> Int ! alloc
+# Longitud máxima de la descripción de cada skill en el prompt, y presupuesto de todo el listado.
+fn skills_desc_max() -> Int
+    240
+
+fn skills_prompt_budget() -> Int
+    6000
+
+fn skills_add_roots(out: Int, dir: String) -> Int ! alloc
+    x = sk_sl_push(out, dir + "/.supercoder/skills")
+    x = sk_sl_push(out, dir + "/.opencode/skills")
+    x = sk_sl_push(out, dir + "/.claude/skills")
+    0
+
+# Directorios de skills por orden de prioridad (ver arriba).
+fn skills_dirs() -> Int ! io, alloc
     sl = sk_sl_new()
-    x = sk_sl_push(sl, ".supercoder/skills")
-    x = sk_sl_push(sl, ".opencode/skills")
-    x = sk_sl_push(sl, ".claude/skills")
+    dir = cwd_path()
+    levels = 0
+    go = 1
+    while go != 0
+        x = skills_add_roots(sl, dir)
+        levels = levels + 1
+        if fsx_exists(dir + "/.git") != 0
+            go = 0
+        elsif str_eq(dir, "/") != 0
+            go = 0
+        elsif levels >= 8
+            go = 0
+        else
+            dir = path_dirname(dir)
+    home = home_dir()
+    if str_len(home) > 0
+        y = sk_sl_push(sl, home + "/.supercoder/skills")
+        y = sk_sl_push(sl, home + "/.config/opencode/skills")
+        y = sk_sl_push(sl, home + "/.claude/skills")
     sl
 
-# Entradas "nombre<TAB>descripción<TAB>ruta del SKILL.md" de los skills encontrados.
+# 1 si `path` está dentro de algún directorio de skills (se puede leer sin pedir permiso).
+fn skills_path_ok(path: String) -> Int ! io, alloc
+    dirs = skills_dirs()
+    i = 0
+    while i < sk_sl_len(dirs)
+        d = sk_sl_get(dirs, i)
+        if sk_starts_with(path, d + "/") != 0
+            return 1
+        i = i + 1
+    0
+
+# Entradas "nombre<TAB>descripción<TAB>ruta del SKILL.md<TAB>invocable por el modelo (1/0)".
 fn skills_scan() -> Int ! io, alloc
     out = sk_sl_new()
     seen = sk_sl_new()
@@ -39,39 +86,148 @@ fn skills_scan() -> Int ! io, alloc
                     if sk_sl_contains(seen, name) == 0
                         x = sk_sl_push(seen, name)
                         desc = sk_replace_all(sk_trim(fm_get(fm, "description")), char_to_str(10), " ")
-                        x = sk_sl_push(out, name + tab + desc + tab + file)
+                        model_ok = 1
+                        if str_eq(sk_lower(sk_trim(fm_get(fm, "disable-model-invocation"))), "true") != 0
+                            model_ok = 0
+                        x = sk_sl_push(out, name + tab + desc + tab + file + tab + int_to_str(model_ok))
             i = i + 1
         di = di + 1
     out
 
+fn skill_entry_name(e: String) -> String ! alloc
+    sk_sl_get(sk_split_char(e, 9), 0)
+
+fn skill_entry_desc(e: String) -> String ! alloc
+    sk_sl_get(sk_split_char(e, 9), 1)
+
+fn skill_entry_file(e: String) -> String ! alloc
+    sk_sl_get(sk_split_char(e, 9), 2)
+
+fn skill_entry_model_ok(e: String) -> Int ! alloc
+    parts = sk_split_char(e, 9)
+    if sk_sl_len(parts) < 4
+        return 1
+    if str_eq(sk_sl_get(parts, 3), "0") != 0
+        return 0
+    1
+
+# Número de skills que el modelo puede cargar por sí mismo.
+fn skills_model_count() -> Int ! io, alloc
+    all = skills_scan()
+    n = 0
+    i = 0
+    while i < sk_sl_len(all)
+        n = n + skill_entry_model_ok(sk_sl_get(all, i))
+        i = i + 1
+    n
+
+fn skill_clip(desc: String) -> String ! alloc
+    if str_len(desc) <= skills_desc_max()
+        return desc
+    str_slice(desc, 0, skills_desc_max()) + "..."
+
 # Sección del prompt de sistema ("" si no hay skills).
 fn skills_prompt() -> String ! io, alloc
     all = skills_scan()
-    if sk_sl_len(all) == 0
-        return ""
     nl = char_to_str(10)
-    out = "# Skills" + nl + "Specialized instructions are available through the skill tool. Load a skill when the task matches its description:"
+    lines = sk_sl_new()
+    used = 0
     i = 0
     while i < sk_sl_len(all)
-        parts = sk_split_char(sk_sl_get(all, i), 9)
-        out = out + nl + "- " + sk_sl_get(parts, 0) + ": " + sk_sl_get(parts, 1)
+        e = sk_sl_get(all, i)
+        if skill_entry_model_ok(e) != 0
+            line = "- " + skill_entry_name(e)
+            if used < skills_prompt_budget()
+                line = line + ": " + skill_clip(skill_entry_desc(e))
+            used = used + str_len(line)
+            x = sk_sl_push(lines, line)
         i = i + 1
-    out
+    if sk_sl_len(lines) == 0
+        return ""
+    "# Skills" + nl + "Skills hold specialized instructions and workflows. When the task matches the description of a skill, call the skill tool with its name BEFORE doing the work, then follow the instructions it returns. Do not load a skill that is not relevant. Available skills:" + nl + sk_join(lines, nl)
+
+# Ficheros del skill (sin SKILL.md), con ruta relativa a su directorio; máximo 20.
+fn skill_files(dir: String) -> String ! io, alloc
+    ign = sk_sl_new()
+    x = sk_sl_push(ign, ".git")
+    all = fsx_walk(dir, ign, 200)
+    out = sk_sl_new()
+    i = 0
+    while i < sk_sl_len(all)
+        rel = sk_sl_get(all, i)
+        if str_eq(rel, "SKILL.md") == 0
+            if sk_sl_len(out) < 20
+                y = sk_sl_push(out, "<file>" + dir + "/" + rel + "</file>")
+        i = i + 1
+    sk_join(out, char_to_str(10))
+
+# Texto que se entrega al modelo al cargar un skill: cuerpo (con $ARGUMENTS sustituido),
+# directorio base y ficheros que lo acompañan.
+fn skill_render(name: String, file: String, args: String) -> String ! io, alloc
+    fm = fm_parse(fsx_read_text_max(file, 200000))
+    nl = char_to_str(10)
+    base = path_abs(str_slice(file, 0, str_len(file) - 9))
+    body = fm_body(fm)
+    if sk_contains(body, "$ARGUMENTS") != 0
+        body = sk_replace_all(body, "$ARGUMENTS", args)
+    elsif str_len(args) > 0
+        body = body + nl + nl + "ARGUMENTS: " + args
+    files = skill_files(base)
+    out = "<skill_content name=\"" + name + "\">" + nl + body + nl + nl + "Base directory for this skill: " + base + nl + "Relative paths in the skill are relative to this directory."
+    if str_len(files) > 0
+        out = out + nl + "<skill_files>" + nl + files + nl + "</skill_files>"
+    out + nl + "</skill_content>"
+
+# Entrada del skill `name` ("" si no existe); con `model_only` solo los que el modelo puede invocar.
+fn skill_find(name: String, model_only: Int) -> String ! io, alloc
+    all = skills_scan()
+    i = 0
+    while i < sk_sl_len(all)
+        e = sk_sl_get(all, i)
+        if str_eq(skill_entry_name(e), name) != 0
+            if model_only == 0
+                return e
+            if skill_entry_model_ok(e) != 0
+                return e
+        i = i + 1
+    ""
 
 fn tool_skill(c: Int, d: Int, a: Int) -> Int ! io, alloc
     want = sk_trim(arg_str(d, a, "name", ""))
-    all = skills_scan()
+    e = skill_find(want, 1)
+    if str_len(e) > 0
+        return tr_ok(skill_render(want, skill_entry_file(e), arg_str(d, a, "arguments,args", "")), "Loaded skill: " + want)
     names = sk_sl_new()
+    all = skills_scan()
     i = 0
     while i < sk_sl_len(all)
-        parts = sk_split_char(sk_sl_get(all, i), 9)
-        x = sk_sl_push(names, sk_sl_get(parts, 0))
-        if str_eq(sk_sl_get(parts, 0), want) != 0
-            file = sk_sl_get(parts, 2)
-            fm = fm_parse(fsx_read_text_max(file, 200000))
-            nl = char_to_str(10)
-            base = path_abs(str_slice(file, 0, str_len(file) - 9))
-            body = "<skill_content name=\"" + want + "\">" + nl + fm_body(fm) + nl + nl + "Base directory for this skill: " + base + nl + "</skill_content>"
-            return tr_ok(body, "Loaded skill: " + want)
+        if skill_entry_model_ok(sk_sl_get(all, i)) != 0
+            x = sk_sl_push(names, skill_entry_name(sk_sl_get(all, i)))
         i = i + 1
     tr_err("Skill '" + want + "' not found. Available skills: " + sk_join(names, ", "))
+
+# Invocación del usuario: un prompt que empieza por `/nombre [argumentos]` con un skill existente
+# se convierte en una petición que lleva el skill ya cargado. Si no, devuelve el prompt tal cual.
+fn skill_expand_prompt(prompt: String) -> String ! io, alloc
+    t = sk_trim(prompt)
+    if str_len(t) < 2
+        return str_slice(prompt, 0, str_len(prompt))
+    if str_char(t, 0) != 47
+        return str_slice(prompt, 0, str_len(prompt))
+    sp = sk_index_of(t, " ")
+    nl_pos = sk_index_of(t, char_to_str(10))
+    if nl_pos >= 0
+        if sp < 0
+            sp = nl_pos
+        elsif nl_pos < sp
+            sp = nl_pos
+    name = str_slice(t, 1, str_len(t))
+    args = ""
+    if sp > 0
+        name = str_slice(t, 1, sp)
+        args = sk_trim(str_slice(t, sp + 1, str_len(t)))
+    e = skill_find(name, 0)
+    if str_len(e) == 0
+        return str_slice(prompt, 0, str_len(prompt))
+    nl = char_to_str(10)
+    "The user invoked the skill \"" + name + "\". Follow its instructions to do what they ask." + nl + nl + skill_render(name, skill_entry_file(e), args)

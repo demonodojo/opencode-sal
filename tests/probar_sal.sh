@@ -255,6 +255,43 @@ assert len(last) < 20, len(last)
 PY
   echo "OK compactación"
 
+  # skills: /nombre carga el skill (con bloque ">-"), multiedit y un proceso en segundo plano no bloquea bash
+  sk="$e2e/skills"; mkdir -p "$sk/.claude/skills/demo/scripts"
+  printf -- '---\nname: demo\ndescription: >-\n  Demo skill\n  for tests.\n---\nHaz la demo con $ARGUMENTS.\n' > "$sk/.claude/skills/demo/SKILL.md"
+  echo 'echo hi' > "$sk/.claude/skills/demo/scripts/run.sh"
+  printf 'uno\ndos\n' > "$sk/multi.txt"
+  rec="$e2e/skills-rec"
+  RECORD_DIR="$rec" start_mock "$root/tests/guiones/solo_texto.json"
+  (cd "$sk" && "$bin" run --format json --yes --session k1 "/demo la compilación" > "$e2e/k1.jsonl" 2>/dev/null) || true
+  stop_mock
+  python3 - "$rec" <<'PY' || { echo "FALLO: skills /nombre" >&2; exit 1; }
+import json, sys
+req = json.load(open(sys.argv[1] + "/peticion-01.json"))
+system = req["messages"][0]["content"]
+user = req["messages"][1]["content"]
+assert "- demo: Demo skill for tests." in system, system[-600:]
+assert "The user invoked the skill \"demo\"" in user and "Haz la demo con la compilación." in user, user
+assert "scripts/run.sh" in user
+assert "skill" in [t["function"]["name"] for t in req["tools"]]
+PY
+  rec="$e2e/multi-rec"
+  RECORD_DIR="$rec" start_mock "$root/tests/guiones/multiedit_bg.json"
+  t0=$(date +%s)
+  (cd "$sk" && "$bin" run --format json --yes --session k2 "edita" > "$e2e/k2.jsonl" 2>/dev/null) || true
+  t1=$(date +%s)
+  stop_mock
+  python3 - "$e2e/k2.jsonl" "$sk/multi.txt" "$((t1 - t0))" <<'PY' || { echo "FALLO: multiedit/bash" >&2; exit 1; }
+import json, sys
+ev = [json.loads(l) for l in open(sys.argv[1])]
+done = [(e["part"]["tool"], e["part"]["state"]["status"]) for e in ev if e["type"] == "tool_use" and e["part"]["state"]["status"] != "running"]
+assert done == [("multiedit", "completed"), ("bash", "completed"), ("skill", "completed")], done
+assert open(sys.argv[2]).read() == "1\n2\n"
+bash = [e for e in ev if e["type"] == "tool_use" and e["part"]["tool"] == "bash" and e["part"]["state"]["status"] == "completed"][0]
+assert bash["part"]["state"]["output"].strip() == "lanzado", bash["part"]["state"]["output"]
+assert int(sys.argv[3]) < 20, "bash esperó al proceso en segundo plano: %ss" % sys.argv[3]
+PY
+  echo "OK skills y herramientas nuevas"
+
   # backend `claude -p`: claude falso en PATH
   fakebin="$e2e/fakebin"; mkdir -p "$fakebin"
   printf '#!/bin/sh\necho "args: $*"\necho "segunda \\"linea\\""\n' > "$fakebin/claude"

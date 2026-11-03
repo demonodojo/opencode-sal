@@ -4,6 +4,7 @@
 import "salkit/fsx.sal"
 import "salkit/strbuf.sal"
 import "src/tools/common.sal"
+import "src/tools/read.sal"
 import "src/util.sal"
 
 # Número de línea (desde 1) de la posición `idx`.
@@ -67,12 +68,106 @@ fn find_trimmed(text: String, old: String) -> Int ! alloc
                     fe = vec_get(starts, i + m) - 1
                     if fe > str_len(text)
                         fe = str_len(text)
+                    if fe > fs
+                        if str_char(text, fe - 1) == 13
+                            fe = fe - 1
                 found = found + 1
             i = i + 1
     x = vec_push(r, found)
     x = vec_push(r, fs)
     x = vec_push(r, fe)
     r
+
+# Fragmento numerado del fichero alrededor de la línea `first` (hasta `count` líneas) para que el
+# modelo compruebe el resultado sin volver a leer.
+fn edit_snippet(text: String, first: Int, count: Int) -> String ! alloc
+    start = first - 2
+    if start < 1
+        start = 1
+    w = read_window(text, start, count + 4)
+    "<snippet>" + char_to_str(10) + str_from_int(vec_get(w, 0)) + "</snippet>"
+
+# Primera línea del texto `old` que tiene contenido (recortada), o "".
+fn edit_first_line(old: String) -> String ! alloc
+    lines = sk_split_lines(old)
+    i = 0
+    while i < sk_sl_len(lines)
+        t = sk_trim(sk_sl_get(lines, i))
+        if str_len(t) > 0
+            return t
+        i = i + 1
+    ""
+
+# Pista para un oldString que no aparece: dónde está su primera línea, si está.
+fn edit_hint(text: String, old: String) -> String ! alloc
+    first = edit_first_line(old)
+    if str_len(first) == 0
+        return ""
+    starts = line_starts(text)
+    total = vec_len(starts) - 1
+    i = 0
+    while i < total
+        if str_eq(sk_trim(line_text(text, starts, i)), first) != 0
+            w = read_window(text, i + 1, 6)
+            return char_to_str(10) + "The first line of oldString does appear at line " + int_to_str(i + 1) + ", but the following lines differ. Actual text there:" + char_to_str(10) + str_from_int(vec_get(w, 0))
+        i = i + 1
+    ""
+
+# Sustituye `old` por `new` en `text`. Devuelve un vec [estado (0 ok, 1 error), texto nuevo o
+# mensaje de error, sustituciones, posición de la primera sustitución, coincidencia sin sangría (0/1)].
+fn edit_apply(path: String, text: String, old: String, new: String, all: Int) -> Int ! alloc
+    r = vec_new()
+    # Un fichero con finales CRLF: el modelo escribe "\n"; se adapta para que casen y se conserven.
+    o = str_slice(old, 0, str_len(old))
+    n = str_slice(new, 0, str_len(new))
+    if sk_contains(text, "\r\n") != 0
+        if sk_contains(o, "\r") == 0
+            o = sk_replace_all(o, "\n", "\r\n")
+            if sk_contains(n, "\r") == 0
+                n = sk_replace_all(n, "\n", "\r\n")
+    cnt = sk_count(text, o)
+    if cnt == 0
+        ft = find_trimmed(text, o)
+        found = vec_get(ft, 0)
+        if found == 0
+            x = vec_push(r, 1)
+            x = vec_push(r, str_as_int("oldString was not found in " + path + ". It must match the file exactly, including whitespace and indentation. Read the file again and copy the text verbatim." + edit_hint(text, old)))
+            return r
+        if found > 1
+            x = vec_push(r, 1)
+            x = vec_push(r, str_as_int("oldString matched " + int_to_str(found) + " places when ignoring indentation; add more surrounding lines to make it unique."))
+            return r
+        x = vec_push(r, 0)
+        x = vec_push(r, str_as_int(str_slice(text, 0, vec_get(ft, 1)) + n + str_slice(text, vec_get(ft, 2), str_len(text))))
+        x = vec_push(r, 1)
+        x = vec_push(r, vec_get(ft, 1))
+        x = vec_push(r, 1)
+        return r
+    if cnt > 1
+        if all == 0
+            x = vec_push(r, 1)
+            x = vec_push(r, str_as_int("oldString matched " + int_to_str(cnt) + " places in " + path + ". Add more surrounding lines to make it unique, or set replaceAll to true."))
+            return r
+    first = sk_index_of(text, o)
+    updated = ""
+    reps = 1
+    if all != 0
+        updated = sk_replace_all(text, o, n)
+        reps = cnt
+    else
+        updated = str_slice(text, 0, first) + n + str_slice(text, first + str_len(o), str_len(text))
+    x = vec_push(r, 0)
+    x = vec_push(r, str_as_int(updated))
+    x = vec_push(r, reps)
+    x = vec_push(r, first)
+    x = vec_push(r, 0)
+    r
+
+fn edit_failed(r: Int) -> Int
+    vec_get(r, 0)
+
+fn edit_text(r: Int) -> String
+    str_from_int(vec_get(r, 1))
 
 fn tool_edit(c: Int, d: Int, a: Int) -> Int ! io, alloc
     raw = arg_str(d, a, "filePath,file_path,path,file", "")
@@ -93,34 +188,61 @@ fn tool_edit(c: Int, d: Int, a: Int) -> Int ! io, alloc
     if str_len(old) == 0
         return tr_err("oldString must not be empty for an existing file; use write to replace the whole file")
     text = fsx_read_text(path)
-    cnt = sk_count(text, old)
     title = path_rel(cwd_path(), path)
-    if cnt == 0
-        ft = find_trimmed(text, old)
-        found = vec_get(ft, 0)
-        if found == 0
-            return tr_err("oldString was not found in " + path + ". It must match the file exactly, including whitespace and indentation. Read the file again and copy the text verbatim.")
-        if found > 1
-            return tr_err("oldString matched " + int_to_str(found) + " places when ignoring indentation; add more surrounding lines to make it unique.")
-        updated = str_slice(text, 0, vec_get(ft, 1)) + new + str_slice(text, vec_get(ft, 2), str_len(text))
-        if fsx_write(path, updated) != 0
-            return tr_err("Could not write " + path)
-        return tr_ok("Edited " + path + " (matched ignoring indentation, line " + int_to_str(line_of(text, vec_get(ft, 1))) + ")", title)
-    if cnt > 1
-        if all == 0
-            return tr_err("oldString matched " + int_to_str(cnt) + " places in " + path + ". Add more surrounding lines to make it unique, or set replaceAll to true.")
-    first = sk_index_of(text, old)
-    updated = ""
-    if all != 0
-        updated = sk_replace_all(text, old, new)
-    else
-        updated = str_slice(text, 0, first) + new + str_slice(text, first + str_len(old), str_len(text))
+    r = edit_apply(path, text, old, new, all)
+    if edit_failed(r) != 0
+        return tr_err(edit_text(r))
+    updated = edit_text(r)
     if fsx_write(path, updated) != 0
         return tr_err("Could not write " + path)
-    reps = 1
-    if all != 0
-        reps = cnt
-    tr_ok("Edited " + path + " (" + int_to_str(reps) + " replacement" + select_plural(reps) + ", first at line " + int_to_str(line_of(text, first)) + ")", title)
+    reps = vec_get(r, 2)
+    ln = line_of(text, vec_get(r, 3))
+    msg = "Edited " + path + " (" + int_to_str(reps) + " replacement" + select_plural(reps) + ", first at line " + int_to_str(ln) + ")"
+    if vec_get(r, 4) != 0
+        msg = "Edited " + path + " (matched ignoring indentation, line " + int_to_str(ln) + ")"
+    n_new = sk_count_lines(new)
+    if n_new < 1
+        n_new = 1
+    if n_new > 12
+        n_new = 12
+    tr_ok(msg + char_to_str(10) + edit_snippet(updated, ln, n_new), title)
+
+# multiedit: varias sustituciones en un mismo fichero, en orden; si una falla no se escribe nada.
+fn tool_multiedit(c: Int, d: Int, a: Int) -> Int ! io, alloc
+    raw = arg_str(d, a, "filePath,file_path,path,file", "")
+    path = path_abs(raw)
+    en = arg_node(d, a, "edits")
+    if en < 0
+        return tr_err("Missing required parameter 'edits'")
+    if json_is_array(d, en) == 0
+        return tr_err("'edits' must be an array of objects with oldString, newString and optionally replaceAll")
+    if fsx_is_file(path) == 0
+        return tr_err("File not found: " + path)
+    text = fsx_read_text(path)
+    cur = str_slice(text, 0, str_len(text))
+    k = 0
+    n = json_first(d, en)
+    if n < 0
+        return tr_err("'edits' is empty")
+    summary = sk_sl_new()
+    while n >= 0
+        k = k + 1
+        old = arg_str(d, n, "oldString,old_string,oldText,old_text", "")
+        new = arg_str(d, n, "newString,new_string,newText,new_text", "")
+        all = arg_bool(d, n, "replaceAll,replace_all,all", 0)
+        if str_len(old) == 0
+            return tr_err("Edit " + int_to_str(k) + ": oldString must not be empty. Nothing was changed.")
+        if str_eq(old, new) != 0
+            return tr_err("Edit " + int_to_str(k) + ": oldString and newString are identical. Nothing was changed.")
+        r = edit_apply(path, cur, old, new, all)
+        if edit_failed(r) != 0
+            return tr_err("Edit " + int_to_str(k) + " failed: " + edit_text(r) + char_to_str(10) + "Nothing was changed; fix this edit and send all of them again.")
+        x = sk_sl_push(summary, "edit " + int_to_str(k) + ": " + int_to_str(vec_get(r, 2)) + " replacement" + select_plural(vec_get(r, 2)) + " at line " + int_to_str(line_of(cur, vec_get(r, 3))))
+        cur = edit_text(r)
+        n = json_next(d, n)
+    if fsx_write(path, cur) != 0
+        return tr_err("Could not write " + path)
+    tr_ok("Applied " + int_to_str(k) + " edits to " + path + char_to_str(10) + sk_join(summary, char_to_str(10)), path_rel(cwd_path(), path))
 
 fn select_plural(n: Int) -> String
     if n == 1

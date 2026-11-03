@@ -60,11 +60,51 @@ fn read_dir_listing(path: String) -> String ! io, alloc
         i = i + 1
     out
 
+# Hasta 3 ficheros del mismo directorio cuyo nombre se parece al pedido ("" si no hay).
+fn read_suggest(path: String) -> String ! io, alloc
+    dir = path_dirname(path)
+    base = sk_lower(str_slice(path, str_len(dir) + 1, str_len(path)))
+    if str_len(base) < 2
+        return ""
+    names = fsx_list_dir(dir)
+    found = sk_sl_new()
+    # primero los que empiezan igual (o cuyo nombre es prefijo del pedido); luego los que lo contienen
+    pass = 0
+    while pass < 2
+        i = 0
+        while i < sk_sl_len(names)
+            raw = sk_sl_get(names, i)
+            nm = sk_lower(raw)
+            if sk_ends_with(nm, "/") != 0
+                nm = str_slice(nm, 0, str_len(nm) - 1)
+            if str_len(nm) >= 2
+                hit = 0
+                if pass == 0
+                    if sk_starts_with(nm, base) != 0
+                        hit = 1
+                    if sk_starts_with(base, nm) != 0
+                        hit = 1
+                else
+                    if sk_contains(nm, base) != 0
+                        hit = 1
+                    if sk_contains(base, nm) != 0
+                        hit = 1
+                full = dir + "/" + raw
+                if hit != 0
+                    if sk_sl_len(found) < 3
+                        if sk_sl_contains(found, full) == 0
+                            x = sk_sl_push(found, full)
+            i = i + 1
+        pass = pass + 1
+    if sk_sl_len(found) == 0
+        return ""
+    char_to_str(10) + "Did you mean one of these?" + char_to_str(10) + sk_join(found, char_to_str(10))
+
 fn tool_read(c: Int, d: Int, a: Int) -> Int ! io, alloc
     raw = arg_str(d, a, "filePath,file_path,path,file", "")
     path = path_abs(raw)
     if fsx_exists(path) == 0
-        return tr_err("File not found: " + path)
+        return tr_err("File not found: " + path + read_suggest(path))
     if fsx_is_dir(path) != 0
         listing = read_dir_listing(path)
         return tr_ok("<directory>" + char_to_str(10) + listing + "</directory>", path_rel(cwd_path(), path))
@@ -88,9 +128,15 @@ fn tool_read(c: Int, d: Int, a: Int) -> Int ! io, alloc
     w = read_window(text, offset, limit)
     body = str_from_int(vec_get(w, 0))
     out = "<file>" + char_to_str(10) + body
+    total = sk_count_lines(text)
     if vec_get(w, 2) != 0
-        out = out + char_to_str(10) + "(File has more lines. Use the 'offset' parameter to read beyond line " + int_to_str(vec_get(w, 1)) + ")" + char_to_str(10)
+        out = out + char_to_str(10) + "(File has more lines. Use the 'offset' parameter to read beyond line " + int_to_str(vec_get(w, 1)) + "; the file has " + int_to_str(total) + " lines)" + char_to_str(10)
     elsif str_len(body) == 0
-        out = out + "(empty file or offset past the end)" + char_to_str(10)
+        if total == 0
+            out = out + "(empty file)" + char_to_str(10)
+        else
+            out = out + "(offset " + int_to_str(offset) + " is past the end of the file, which has " + int_to_str(total) + " lines)" + char_to_str(10)
+    elsif offset > 1
+        out = out + char_to_str(10) + "(End of file - " + int_to_str(total) + " lines in total)" + char_to_str(10)
     out = out + "</file>"
     tr_ok(out, path_rel(cwd_path(), path))

@@ -82,4 +82,16 @@ fn main() -> Int ! io, alloc
     f = f + ck_int(tr_failed(b5), 1, 26)
     b6 = jb(c, "{{\"command\":\"true\"}}")
     f = f + ck_str(tr_output(b6), "(no output)", 27)
+    # grep con líneas de contexto, rutas "-" para contexto y ":" para coincidencias
+    x = jw(base + "/ctx.txt", "l1\\nfoo A\\nl3\\nl4\\nl5\\nl6\\nfoo B\\nfoo C\\nl9\\n")
+    gc = jgr("{{\"pattern\":\"foo\",\"path\":\"" + base + "/ctx.txt\",\"context\":1}}")
+    f = f + ck_contains(tr_output(gc), "ctx.txt-1- l1", 80)
+    f = f + ck_contains(tr_output(gc), "ctx.txt:2: foo A", 81)
+    f = f + ck_contains(tr_output(gc), char_to_str(10) + "--" + char_to_str(10), 82)
+    f = f + ck_contains(tr_output(gc), "ctx.txt:8: foo C", 83)
+    f = f + ck_contains(tr_output(gc), "Found 3 matches", 84)
+    # un literal ausente no recorre el fichero una vez por línea
+    gn = jgr("{{\"pattern\":\"zzz_absent\",\"path\":\"" + base + "\"}}")
+    f = f + ck_contains(tr_output(gn), "No matches", 85)
+
     f

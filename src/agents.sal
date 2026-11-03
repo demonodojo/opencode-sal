@@ -78,6 +78,14 @@ fn agents_dirs() -> Int ! alloc
     x = sk_sl_push(sl, ".claude/agents")
     sl
 
+# multiedit se concede junto con edit.
+fn agents_with_multiedit(csv: String) -> String ! alloc
+    l = sk_split_char(csv, 44)
+    if sk_sl_contains(l, "edit") != 0
+        if sk_sl_contains(l, "multiedit") == 0
+            return csv + ",multiedit"
+    csv
+
 # Herramientas permitidas según `tools` del frontmatter ("" = todas).
 fn agents_allow_from(d: Int, n: Int) -> String ! alloc
     if n < 0
@@ -91,14 +99,14 @@ fn agents_allow_from(d: Int, n: Int) -> String ! alloc
             if str_len(p) > 0
                 x = sk_sl_push(names, tool_canon(p))
             i = i + 1
-        return sk_join(names, ",")
+        return agents_with_multiedit(sk_join(names, ","))
     if json_is_array(d, n) != 0
         names = sk_sl_new()
         k = json_first(d, n)
         while k >= 0
             x = sk_sl_push(names, tool_canon(json_str(d, k)))
             k = json_next(d, k)
-        return sk_join(names, ",")
+        return agents_with_multiedit(sk_join(names, ","))
     if json_is_object(d, n) != 0
         off = sk_sl_new()
         k = json_first(d, n)
@@ -106,6 +114,8 @@ fn agents_allow_from(d: Int, n: Int) -> String ! alloc
             if json_kind(d, k) == 1
                 x = sk_sl_push(off, tool_canon(json_key(d, k)))
             k = json_next(d, k)
+        if sk_sl_contains(off, "edit") != 0
+            x = sk_sl_push(off, "multiedit")
         if sk_sl_len(off) == 0
             return ""
         keep = sk_sl_new()

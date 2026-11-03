@@ -3,6 +3,7 @@ import "../../src/tools/write.sal"
 import "../../src/tools/edit.sal"
 import "../../src/tools/common.sal"
 import "salkit/json.sal"
+import "salkit/fsx.sal"
 import "support/assert.sal"
 
 # Ejecuta una herramienta con argumentos JSON.
@@ -13,6 +14,10 @@ fn run_read(args: String) -> Int ! io, alloc
 fn run_write(args: String) -> Int ! io, alloc
     d = json_parse(args)
     tool_write(0, d, json_root(d))
+
+fn run_multi(args: String) -> Int ! io, alloc
+    d = json_parse(args)
+    tool_multiedit(0, d, json_root(d))
 
 fn run_edit(args: String) -> Int ! io, alloc
     d = json_parse(args)
@@ -25,14 +30,16 @@ fn main() -> Int ! io, alloc
     w = run_write("{{\"filePath\":\"" + p + "\",\"content\":\"l1\\nl2\\nl3\\nl4\\n\"}}")
     f = f + ck_int(tr_failed(w), 0, 1)
     f = f + ck_contains(tr_output(w), "Created", 2)
-    w2 = run_write("{{\"path\":\"" + p + "\",\"content\":\"l1\\nl2\\nl3\\nl4\\n\"}}")
+    w1b = run_write("{{\"path\":\"" + p + "\",\"content\":\"l1\\nl2\\nl3\\nl4\\n\"}}")
+    f = f + ck_contains(tr_output(w1b), "already has exactly this content", 53)
+    w2 = run_write("{{\"path\":\"" + p + "\",\"content\":\"l1\\nl2\\nl3\\nl4\\nl5\\n\"}}")
     f = f + ck_contains(tr_output(w2), "Overwrote", 3)
 
     r = run_read("{{\"filePath\":\"" + p + "\"}}")
     f = f + ck_int(tr_failed(r), 0, 4)
-    f = f + ck_str(tr_output(r), "<file>\n00001| l1\n00002| l2\n00003| l3\n00004| l4\n</file>", 5)
+    f = f + ck_str(tr_output(r), "<file>\n00001| l1\n00002| l2\n00003| l3\n00004| l4\n00005| l5\n</file>", 5)
     r2 = run_read("{{\"filePath\":\"" + p + "\",\"offset\":2,\"limit\":2}}")
-    f = f + ck_str(tr_output(r2), "<file>\n00002| l2\n00003| l3\n\n(File has more lines. Use the 'offset' parameter to read beyond line 3)\n</file>", 6)
+    f = f + ck_str(tr_output(r2), "<file>\n00002| l2\n00003| l3\n\n(File has more lines. Use the 'offset' parameter to read beyond line 3; the file has 5 lines)\n</file>", 6)
     r3 = run_read("{{\"filePath\":\"" + base + "/missing.txt\"}}")
     f = f + ck_int(tr_failed(r3), 1, 7)
     f = f + ck_contains(tr_output(r3), "File not found", 8)
@@ -71,6 +78,40 @@ fn main() -> Int ! io, alloc
     f = f + ck_int(tr_failed(e9), 1, 25)
     e10 = run_edit("{{\"file_path\":\"" + p + "\",\"old_string\":\"ok\",\"new_string\":\"fin\"}}")
     f = f + ck_int(tr_failed(e10), 0, 26)
+
+    # el resultado de edit incluye un fragmento numerado del fichero
+    f = f + ck_contains(tr_output(e10), "<snippet>", 27)
+    f = f + ck_contains(tr_output(e10), "fin", 28)
+
+    # multiedit: aplica todo en orden o no toca nada
+    mp = base + "/multi.txt"
+    w4 = run_write("{{\"filePath\":\"" + mp + "\",\"content\":\"one\\ntwo\\nthree\\n\"}}")
+    m1 = run_multi("{{\"filePath\":\"" + mp + "\",\"edits\":[{{\"oldString\":\"one\",\"newString\":\"1\"}},{{\"oldString\":\"1\\ntwo\",\"newString\":\"1\\n2\"}}]}}")
+    f = f + ck_int(tr_failed(m1), 0, 40)
+    f = f + ck_contains(tr_output(m1), "Applied 2 edits", 41)
+    f = f + ck_contains(tr_output(run_read("{{\"filePath\":\"" + mp + "\"}}")), "00002| 2", 42)
+    m2 = run_multi("{{\"filePath\":\"" + mp + "\",\"edits\":[{{\"oldString\":\"three\",\"newString\":\"3\"}},{{\"oldString\":\"absent\",\"newString\":\"x\"}}]}}")
+    f = f + ck_int(tr_failed(m2), 1, 43)
+    f = f + ck_contains(tr_output(m2), "Edit 2 failed", 44)
+    f = f + ck_contains(tr_output(run_read("{{\"filePath\":\"" + mp + "\"}}")), "00003| three", 45)
+    m3 = run_multi("{{\"filePath\":\"" + mp + "\",\"edits\":[]}}")
+    f = f + ck_int(tr_failed(m3), 1, 46)
+
+    # finales CRLF: el modelo escribe \n y el fichero conserva \r\n
+    cp = base + "/crlf.txt"
+    w5 = run_write("{{\"filePath\":\"" + cp + "\",\"content\":\"a\\r\\nb\\r\\nc\\r\\n\"}}")
+    c1 = run_edit("{{\"filePath\":\"" + cp + "\",\"oldString\":\"b\\nc\",\"newString\":\"B\\nC\"}}")
+    f = f + ck_int(tr_failed(c1), 0, 47)
+    f = f + ck_str(fsx_read_text(cp), "a" + char_to_str(13) + char_to_str(10) + "B" + char_to_str(13) + char_to_str(10) + "C" + char_to_str(13) + char_to_str(10), 48)
+
+    # sugerencias cuando el fichero no existe, y pista cuando solo falla parte del texto
+    sg = run_read("{{\"filePath\":\"" + base + "/multi.tx\"}}")
+    f = f + ck_contains(tr_output(sg), "Did you mean", 49)
+    f = f + ck_contains(tr_output(sg), "multi.txt", 50)
+    hn = run_edit("{{\"filePath\":\"" + mp + "\",\"oldString\":\"1\\nWRONG\",\"newString\":\"x\"}}")
+    f = f + ck_contains(tr_output(hn), "does appear at line 1", 51)
+    rp = run_read("{{\"filePath\":\"" + mp + "\",\"offset\":50}}")
+    f = f + ck_contains(tr_output(rp), "past the end", 52)
 
     a1 = json_parse("{{\"n\":\"5\",\"b\":\"true\",\"s\":7}}")
     f = f + ck_int(arg_int(a1, 0, "n", 0), 5, 30)

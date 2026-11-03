@@ -40,6 +40,8 @@ fn tool_required(canon: String) -> String
         return "filePath,file_path,path,file;content,text,contents"
     if str_eq(canon, "edit") != 0
         return "filePath,file_path,path,file;oldString,old_string,oldText,old_text,buscar;newString,new_string,newText,new_text,nuevo"
+    if str_eq(canon, "multiedit") != 0
+        return "filePath,file_path,path,file;edits"
     if str_eq(canon, "glob") != 0
         return "pattern,glob,filePattern"
     if str_eq(canon, "grep") != 0
@@ -78,14 +80,16 @@ fn tdef_for(canon: String) -> String ! io, alloc
         return tdef("write", "Create a new file or completely overwrite an existing one with the given content. Parent directories are created automatically. To change part of an existing file use edit instead.", tprop("filePath", "string", "Path of the file to write") + "," + tprop("content", "string", "The full content of the file"), "filePath,content")
     if str_eq(canon, "edit") != 0
         return tdef("edit", "Replace exact text in an existing file. oldString must match the file contents exactly, including whitespace and indentation, and must be unique in the file; otherwise the edit fails. Include enough surrounding lines to make it unique, or set replaceAll to replace every occurrence. Read the file first and copy the text verbatim.", tprop("filePath", "string", "Path of the file to modify") + "," + tprop("oldString", "string", "The exact text to replace") + "," + tprop("newString", "string", "The text to replace it with (must differ from oldString)") + "," + tprop("replaceAll", "boolean", "Replace every occurrence of oldString (default false)"), "filePath,oldString,newString")
+    if str_eq(canon, "multiedit") != 0
+        return tdef("multiedit", "Apply several edits to ONE file in a single call. The edits run in order, each on the result of the previous one, and either all succeed or the file is left untouched. Prefer it to several edit calls on the same file. Each oldString must match exactly and be unique (or set replaceAll).", tprop("filePath", "string", "Path of the file to modify") + "," + multiedit_items_prop(), "filePath,edits")
     if str_eq(canon, "list") != 0
         return tdef("list", "List files and directories as a tree (3 levels deep; .git, node_modules, target and similar are skipped). Use it to get oriented; use glob or grep to search.", tprop("path", "string", "Directory to list (default: the project directory)"), "")
     if str_eq(canon, "glob") != 0
         return tdef("glob", "Find files whose path matches a glob pattern such as '**/*.sal' or 'src/**/*.ts'. A pattern without '/' is matched against file names at any depth. Returns absolute paths.", tprop("pattern", "string", "The glob pattern to match") + "," + tprop("path", "string", "Directory to search (default: the project directory)"), "pattern")
     if str_eq(canon, "grep") != 0
-        return tdef("grep", "Search file contents with a regular expression (for example 'fn \\w+' or 'TODO|FIXME'). Returns file:line: text for each match. Use include to restrict the files searched (for example '*.sal'). Binary files and build directories are skipped.", tprop("pattern", "string", "Regular expression to search for") + "," + tprop("path", "string", "File or directory to search (default: the project directory)") + "," + tprop("include", "string", "Glob of file names to include, e.g. '*.ts'") + "," + tprop("ignoreCase", "boolean", "Case-insensitive search (default false)"), "pattern")
+        return tdef("grep", "Search file contents with a regular expression (for example 'fn \\w+' or 'TODO|FIXME'). Returns file:line: text for each match. Use include to restrict the files searched (for example '*.sal'). Binary files and build directories are skipped.", tprop("pattern", "string", "Regular expression to search for") + "," + tprop("path", "string", "File or directory to search (default: the project directory)") + "," + tprop("include", "string", "Glob of file names to include, e.g. '*.ts'") + "," + tprop("ignoreCase", "boolean", "Case-insensitive search (default false)") + "," + tprop("context", "integer", "Lines of context to show before and after each match (default 0, max 10)"), "pattern")
     if str_eq(canon, "bash") != 0
-        return tdef("bash", "Run a shell command in the project directory and return its combined stdout and stderr plus the exit code. Use it for builds, tests, git and other command-line tools. Commands run non-interactively with no stdin, so do not start interactive programs or long-running servers. Default timeout is 120000 ms.", tprop("command", "string", "The command to run") + "," + tprop("description", "string", "Short description of what the command does") + "," + tprop("timeout", "integer", "Timeout in milliseconds (max 600000)") + "," + tprop("workdir", "string", "Directory to run the command in (default: the project directory)"), "command")
+        return tdef("bash", "Run a shell command in the project directory and return its combined stdout and stderr plus the exit code. Use it for builds, tests, git and other command-line tools. Commands run non-interactively with no stdin, so do not start interactive programs. A process started in the background with & does not block the call, but is cut off when the call ends. Do not use bash to read, search or edit files (cat, grep, find, sed): use the read, grep, glob and edit tools. Default timeout is 120000 ms.", tprop("command", "string", "The command to run") + "," + tprop("description", "string", "Short description of what the command does") + "," + tprop("timeout", "integer", "Timeout in milliseconds (max 600000)") + "," + tprop("workdir", "string", "Directory to run the command in (default: the project directory)"), "command")
     if str_eq(canon, "todowrite") != 0
         return tdef("todowrite", "Create and update the task list for the current work. Use it for tasks with three or more steps: write the plan first, mark exactly one item in_progress while working on it and mark it completed as soon as it is done. Send the complete list every time.", todo_items_prop(), "todos")
     if str_eq(canon, "todoread") != 0
@@ -93,8 +97,14 @@ fn tdef_for(canon: String) -> String ! io, alloc
     if str_eq(canon, "task") != 0
         return tdef("task", "Launch a subagent to handle a complex, self-contained task autonomously (searching a large codebase, researching a question, a multi-step change). The subagent works in its own context and returns only its final report, so describe the task completely in the prompt: it cannot see this conversation. Available subagents:" + char_to_str(10) + agents_describe(1), tprop("description", "string", "Short (3-5 words) description of the task") + "," + tprop("prompt", "string", "The full task for the subagent, with all the context it needs") + "," + tprop("subagent_type", "string", "Name of the subagent to use"), "description,prompt,subagent_type")
     if str_eq(canon, "skill") != 0
-        return tdef("skill", "Load a skill: specialized instructions for a kind of task. The available skills and when to use them are listed in the system prompt.", tprop("name", "string", "Name of the skill to load"), "name")
+        return tdef("skill", "Load a skill: specialized instructions for a kind of task. The available skills and when to use them are listed in the system prompt.", tprop("name", "string", "Name of the skill to load") + "," + tprop("arguments", "string", "Optional arguments for the skill (replaces $ARGUMENTS in its instructions)"), "name")
     ""
+
+# Esquema del parámetro `edits` de multiedit (array de objetos).
+fn multiedit_items_prop() -> String ! alloc
+    item_props = tprop("oldString", "string", "The exact text to replace") + "," + tprop("newString", "string", "The text to replace it with") + "," + tprop("replaceAll", "boolean", "Replace every occurrence (default false)")
+    item = jb_obj(jb_kv("type", json_quote("object")) + "," + jb_kv("properties", jb_obj(item_props)) + "," + jb_kv("required", jb_arr(json_quote("oldString") + "," + json_quote("newString"))))
+    jb_kv("edits", jb_obj(jb_kv("type", json_quote("array")) + "," + jb_kv("description", json_quote("The edits to apply, in order")) + "," + jb_kv("items", item)))
 
 # Esquema del parámetro `todos` (array de objetos).
 fn todo_items_prop() -> String ! alloc
@@ -116,7 +126,7 @@ fn tools_defs_depth(allow: String, depth: Int) -> String ! io, alloc
         nm = sk_sl_get(names, i)
         offer = tool_allowed(allow, nm)
         if str_eq(nm, "skill") != 0
-            if sk_sl_len(skills_scan()) == 0
+            if skills_model_count() == 0
                 offer = 0
         if str_eq(nm, "task") != 0
             if depth >= 1
@@ -178,6 +188,8 @@ fn tool_exec(c: Int, name: String, args_text: String) -> Int ! io, alloc
         return tool_write(c, d, a)
     if str_eq(canon, "edit") != 0
         return tool_edit(c, d, a)
+    if str_eq(canon, "multiedit") != 0
+        return tool_multiedit(c, d, a)
     if str_eq(canon, "list") != 0
         return tool_list(c, d, a)
     if str_eq(canon, "glob") != 0

@@ -31,6 +31,8 @@ soso-pkg instalar supercoder-sal
 - `supercoder run [opciones] <prompt>` — agente de código con herramientas, historial real, permisos, subagentes e imágenes (ver abajo)
 - `supercoder session list` — sesiones guardadas
 - `supercoder agents` — agentes disponibles
+- `supercoder skills` — skills descubiertos (proyecto y usuario)
+- `supercoder tool NOMBRE JSON [--yes]` — ejecuta una herramienta sin modelo (depuración)
 - `soso-improve-sal campana <dir>` — coordinador (captura, diez pasos, validación); lanza `supercoder run --format json --yes`
 - `supercoder reinstalar` — reinstala vía `soso-pkg` (borrador)
 
@@ -52,9 +54,18 @@ El historial completo se guarda en `$SUPERCODER_HOME/sessions/<id>/messages.json
 
 ### Herramientas
 
-`read` (líneas numeradas, directorios, imágenes), `write`, `edit` (texto exacto, `replaceAll`), `list`, `glob`, `grep` (regex), `bash` (timeout, salida recortada), `todowrite`/`todoread`, `skill` (carga `SKILL.md` de `.supercoder/skills`, `.opencode/skills` o `.claude/skills`) y `task` (subagentes). Los esquemas JSON se envían al modelo y los argumentos se validan; los errores vuelven al modelo para que corrija.
+`read` (líneas numeradas, directorios, imágenes; si el fichero no existe sugiere nombres parecidos), `write`, `edit` (texto exacto, tolera la sangría y los finales CRLF, `replaceAll`; devuelve un fragmento del resultado y, si falla, dónde aparece la primera línea), `multiedit` (varias sustituciones atómicas en un fichero), `list`, `glob`, `grep` (regex o literal, `include`, `ignoreCase`, `context`), `bash` (timeout, salida recortada; un proceso en segundo plano no bloquea la orden), `todowrite`/`todoread`, `skill` y `task` (subagentes). Los esquemas JSON se envían al modelo y los argumentos se validan; los errores vuelven al modelo para que corrija.
 
-### Permisos
+### Skills
+
+Un skill es una carpeta con un `SKILL.md` (frontmatter `name`, `description`, y opcionalmente `disable-model-invocation: true`; admite `description: >-` y `|`). Se buscan, y gana el primero con un nombre dado, en:
+
+1. el directorio de trabajo y sus ascendientes hasta la raíz del repositorio: `.supercoder/skills`, `.opencode/skills`, `.claude/skills`;
+2. el directorio del usuario: `~/.supercoder/skills`, `~/.config/opencode/skills`, `~/.claude/skills` (se siguen los enlaces simbólicos).
+
+El prompt de sistema lista cada skill con su descripción (recortada) y el modelo lo carga con la herramienta `skill` antes de empezar la tarea: recibe el cuerpo, el directorio base y los ficheros que lo acompañan, que puede leer sin pedir permiso. El usuario también puede invocar uno escribiendo `/nombre argumentos` al principio del prompt (`$ARGUMENTS` se sustituye en el cuerpo). `supercoder skills` los lista; las reglas `permission.skill` permiten `allow`/`ask`/`deny` por nombre.
+
+## Permisos
 
 ```json
 { "permission": { "edit": "allow", "bash": { "git status*": "allow", "rm *": "deny", "*": "ask" }, "external_directory": "ask" } }

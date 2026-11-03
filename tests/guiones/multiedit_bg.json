@@ -1,0 +1,12 @@
+{
+  "name": "multiedit_bg",
+  "steps": [
+    { "type": "tool_calls", "name": "multiedit",
+      "arguments": { "filePath": "multi.txt",
+        "edits": [ { "oldString": "uno", "newString": "1" }, { "oldString": "dos", "newString": "2" } ] } },
+    { "type": "tool_calls", "name": "bash",
+      "arguments": { "command": "sleep 30 &\necho lanzado", "description": "proceso en segundo plano" } },
+    { "type": "tool_calls", "name": "skill", "arguments": { "name": "demo", "arguments": "rápido" } },
+    { "type": "content", "text": "hecho" }
+  ]
+}

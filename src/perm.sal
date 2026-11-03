@@ -19,6 +19,7 @@ import "src/agent/ctx.sal"
 import "src/config.sal"
 import "src/events.sal"
 import "src/session.sal"
+import "src/skills.sal"
 import "src/tools/common.sal"
 import "src/util.sal"
 
@@ -142,16 +143,61 @@ fn perm_bash_readonly(cmd: String) -> Int ! alloc
         i = i + 1
     words = sk_split_char(t, 32)
     w0 = sk_sl_get(words, 0)
-    simple = sk_split_char("ls,cat,head,tail,pwd,echo,wc,grep,rg,stat,file,which,date,whoami,uname,tree,sort,uniq,diff,basename,dirname,realpath,true,false", 44)
+    # opciones que escriben ficheros aunque el programa sea de lectura (--output=, -o)
+    k = 1
+    while k < sk_sl_len(words)
+        w = sk_sl_get(words, k)
+        if sk_starts_with(w, "--output") != 0
+            return 0
+        if str_eq(w, "-o") != 0
+            if str_eq(w0, "sort") != 0
+                return 0
+            if str_eq(w0, "tree") != 0
+                return 0
+        k = k + 1
+    simple = sk_split_char("ls,cat,head,tail,pwd,echo,wc,grep,rg,stat,file,which,date,whoami,uname,tree,sort,diff,basename,dirname,realpath,true,false", 44)
     if sk_sl_contains(simple, w0) != 0
         return 1
+    if str_eq(w0, "uniq") != 0
+        return perm_args_at_most(words, 1)
     if str_eq(w0, "git") != 0
         if sk_sl_len(words) >= 2
             sub = sk_sl_get(words, 1)
-            gits = sk_split_char("status,diff,log,show,branch,rev-parse,remote,tag,ls-files,blame,describe", 44)
+            gits = sk_split_char("status,diff,log,show,rev-parse,ls-files,blame,describe", 44)
             if sk_sl_contains(gits, sub) != 0
                 return 1
+            # branch, tag y remote solo listan cuando no llevan argumentos que creen o borren
+            lists = sk_split_char("branch,tag,remote", 44)
+            if sk_sl_contains(lists, sub) != 0
+                return perm_list_flags_only(words)
     0
+
+# 1 si hay como mucho `n` argumentos que no sean opciones (palabra 0 es el programa).
+fn perm_args_at_most(words: Int, n: Int) -> Int ! alloc
+    cnt = 0
+    i = 1
+    while i < sk_sl_len(words)
+        w = sk_sl_get(words, i)
+        if str_len(w) > 0
+            if str_char(w, 0) != 45
+                cnt = cnt + 1
+        i = i + 1
+    if cnt <= n
+        1
+    else
+        0
+
+# 1 si tras `git <sub>` solo hay opciones de listado (-a, -r, -v, --list, --show-current...).
+fn perm_list_flags_only(words: Int) -> Int ! alloc
+    okf = sk_split_char("-a,-r,-v,-vv,-l,--list,--all,--remotes,--verbose,--show-current,--merged,--no-merged", 44)
+    i = 2
+    while i < sk_sl_len(words)
+        w = sk_sl_get(words, i)
+        if str_len(w) > 0
+            if sk_sl_contains(okf, w) == 0
+                return 0
+        i = i + 1
+    1
 
 fn perm_default(kind: String, subject: String) -> Int ! alloc
     if str_eq(kind, "bash") != 0
@@ -210,7 +256,7 @@ fn perm_pattern(kind: String, subject: String) -> String ! alloc
                 return w0 + " " + sk_sl_get(words, 1) + " *"
         return w0 + " *"
     if str_eq(kind, "external_directory") != 0
-        return subject
+        return path_dirname(subject) + "/*"
     "*"
 
 fn perm_grant(c: Int, kind: String, subject: String) -> Int ! io, alloc
@@ -333,6 +379,8 @@ fn perm_kind(canon: String) -> String ! alloc
         return "edit"
     if str_eq(canon, "edit") != 0
         return "edit"
+    if str_eq(canon, "multiedit") != 0
+        return "edit"
     if str_eq(canon, "read") != 0
         return "read"
     if str_eq(canon, "list") != 0
@@ -347,8 +395,10 @@ fn perm_kind(canon: String) -> String ! alloc
         return "skill"
     ""
 
-# 1 si la ruta absoluta está fuera del directorio de trabajo.
+# 1 si la ruta absoluta está fuera del directorio de trabajo (los skills no cuentan como fuera).
 fn perm_outside(path: String) -> Int ! io, alloc
+    if skills_path_ok(path) != 0
+        return 0
     root = cwd_path()
     if str_eq(path, root) != 0
         return 0
