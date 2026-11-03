@@ -308,6 +308,8 @@ fn tui_turn(line: String, cont: Int) -> Int ! io, alloc
                 t = json_get_str(d, r, "type")
                 if str_eq(t, "text") != 0
                     _t = ev_tui_log_add(json_get_str(d, json_get(d, r, "part"), "text"))
+                elsif str_eq(t, "status") != 0
+                    _st = ev_tui_log_add("· " + json_get_str(d, json_get(d, r, "part"), "text"))
                 elsif str_eq(t, "error") != 0
                     em = json_path(d, r, "error.data.message")
                     if em >= 0
@@ -323,6 +325,8 @@ fn tui_turn(line: String, cont: Int) -> Int ! io, alloc
                     reply = tui_ask_permission(json_get_str(d, pt, "title"))
                     msg = jb_obj(jb_kv("type", json_quote("permission_reply")) + "," + jb_kv("id", json_quote(json_get_str(d, pt, "id"))) + "," + jb_kv("reply", json_quote(reply)))
                     _w = child_write_line(h, msg)
+                if str_eq(t, "permission_request") == 0
+                    _dr = tui_draw_session()
     child_finish(h)
 
 fn tui_loop_go(turn: Int) -> Int ! io, alloc

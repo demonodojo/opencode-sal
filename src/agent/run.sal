@@ -12,6 +12,7 @@ import "src/agents.sal"
 import "src/config.sal"
 import "src/events.sal"
 import "src/provider/claude.sal"
+import "src/provider/claude_stream.sal"
 import "src/session.sal"
 import "src/skills.sal"
 import "src/tools/registry.sal"
@@ -39,7 +40,8 @@ fn history_as_text(msgs: Int) -> String ! alloc
         out = str_slice(out, str_len(out) - 6000, str_len(out))
     out
 
-# `claude -p` gestiona sus propias herramientas: aquí solo se pasa el prompt y se emite la respuesta.
+# `claude -p` gestiona sus propias herramientas: aquí solo se pasa el prompt y se traducen sus eventos
+# (inicio, texto, herramientas, avisos de que sigue en marcha) a los de supercoder.
 fn run_claude(c: Int, prompt: String, files: String) -> Int ! io, alloc
     x = ev_step_start(c)
     ctxt = history_as_text(ctx_msgs(c))
@@ -48,16 +50,36 @@ fn run_claude(c: Int, prompt: String, files: String) -> Int ! io, alloc
         full = full + char_to_str(10) + char_to_str(10) + "Attached files (read them with your Read tool):" + char_to_str(10) + sk_join(sk_split_lines(sk_trim(files)), char_to_str(10))
     if str_len(ctxt) > 0
         full = "Previous conversation:" + char_to_str(10) + ctxt + char_to_str(10) + "Current request: " + full
-    txt = claude_run(ctx_model(c), full)
-    if str_len(txt) == 0
-        x = ev_error(c, "claude -p returned no response")
-        x = ev_step_finish(c, "error", 0, 0)
+    st = claude_stream(c, ctx_model(c), full)
+    if st < 0
+        x = ev_error(c, "no se pudo lanzar claude: ¿está instalado y en el PATH?")
+        y = ev_step_finish(c, "error", 0, 0)
         return 1
-    x = ev_text(c, txt)
-    x = sk_sl_push(ctx_msgs(c), msg_user(prompt))
-    x = sk_sl_push(ctx_msgs(c), msg_assistant(txt, 0 - 1))
-    x = ev_step_finish(c, "stop", 0, 0)
-    x = session_save(ctx_session(c), ctx_msgs(c))
+    claude_finish(c, st, prompt)
+
+# Cierra la ejecución de claude: texto final, historial, tokens. 0 si hubo respuesta, 1 si no.
+fn claude_finish(c: Int, st: Int, prompt: String) -> Int ! io, alloc
+    txt = cs_result(st)
+    if vec_get(st, 0) == 0
+        if str_len(txt) > 0
+            x = ev_text(c, txt)
+    answered = 1
+    if str_len(txt) == 0
+        if vec_get(st, 0) == 0
+            answered = 0
+    if cs_failed(st) != 0
+        answered = 0
+    if answered == 0
+        if cs_failed(st) == 0
+            y = ev_error(c, "claude -p returned no response")
+        elsif str_len(txt) > 0
+            y2 = ev_error(c, txt)
+        z = ev_step_finish(c, "error", cs_in(st), cs_out(st))
+        return 1
+    w = sk_sl_push(ctx_msgs(c), msg_user(prompt))
+    w2 = sk_sl_push(ctx_msgs(c), msg_assistant(txt, 0 - 1))
+    w3 = ev_step_finish(c, "stop", cs_in(st), cs_out(st))
+    w4 = session_save(ctx_session(c), ctx_msgs(c))
     0
 
 # Opciones de ejecución: vec [out, max_turns, session, cont, model, agent, interactive, yes].

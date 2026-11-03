@@ -19,6 +19,7 @@ export type SuperEvent =
   | { kind: 'text'; text: string }
   | { kind: 'text_delta'; text: string }
   | { kind: 'step_finish'; input: number; output: number }
+  | { kind: 'status'; text: string }
   | { kind: 'error'; message: string }
   | { kind: 'permission'; id: string; callId: string; tool: string; title: string; input?: Record<string, unknown> }
   | { kind: 'todo'; todos: Todo[] }
@@ -56,6 +57,8 @@ function parseObject(o: any): SuperEvent | undefined {
     }
     case 'text':
       return { kind: 'text', text: String(part.text ?? '') };
+    case 'status':
+      return { kind: 'status', text: String(part.text ?? '') };
     case 'text_delta':
       return { kind: 'text_delta', text: String(part.text ?? '') };
     case 'step_finish':

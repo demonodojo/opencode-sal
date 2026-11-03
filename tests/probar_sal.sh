@@ -292,19 +292,54 @@ assert int(sys.argv[3]) < 20, "bash esperó al proceso en segundo plano: %ss" % 
 PY
   echo "OK skills y herramientas nuevas"
 
-  # backend `claude -p`: claude falso en PATH
+  # backend `claude -p`: claude falso en PATH que emite stream-json (init, herramienta, texto, resultado)
   fakebin="$e2e/fakebin"; mkdir -p "$fakebin"
-  printf '#!/bin/sh\necho "args: $*"\necho "segunda \\"linea\\""\n' > "$fakebin/claude"
+  cat > "$fakebin/claude" <<'SH'
+#!/bin/sh
+case "$*" in *"--output-format stream-json"*) ;; *) echo "faltan flags: $*" >&2; exit 3;; esac
+if [ -n "$FAKE_CLAUDE_FAIL" ]; then echo "boom en stderr" >&2; exit 4; fi
+echo '{"type":"system","subtype":"init","model":"fake-model","session_id":"s-1"}'
+echo '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls","description":"lista"}}]}}'
+sleep "${FAKE_CLAUDE_SLEEP:-0}"
+echo '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"a.txt","is_error":false}]}}'
+printf '{"type":"assistant","message":{"content":[{"type":"text","text":"args: %s"}]}}\n' "$*"
+echo '{"type":"result","is_error":false,"result":"final","usage":{"input_tokens":5,"output_tokens":7}}'
+SH
   chmod +x "$fakebin/claude"
-  salida=$(cd "$cfgdir" && rm -f supercoder.json && PATH="$fakebin:$PATH" "$bin" run --format json --model claude:sonnet "di hola")
+  salida=$(cd "$cfgdir" && rm -f supercoder.json && FAKE_CLAUDE_SLEEP=12 PATH="$fakebin:$PATH" "$bin" run --format json --model claude:sonnet "di hola")
   python3 - "$salida" <<'PY' || { echo "FALLO: backend claude -p" >&2; exit 1; }
 import json, sys
 ev = [json.loads(l) for l in sys.argv[1].splitlines()]
+kinds = [e["type"] for e in ev]
+assert kinds[0] == "step_start" and kinds[-1] == "step_finish", kinds
+st = [e["part"]["text"] for e in ev if e["type"] == "status"]
+assert st[0].startswith("lanzando claude -p (modelo sonnet)"), st
+assert any("fake-model" in t for t in st), st
+assert any("sigue en marcha" in t for t in st), st
+assert st[-1].startswith("claude terminó"), st
+tools = [(e["part"]["tool"], e["part"]["state"]["status"]) for e in ev if e["type"] == "tool_use"]
+assert tools == [("Bash", "running"), ("Bash", "completed")], tools
 txt = [e for e in ev if e["type"] == "text"][0]["part"]["text"]
-assert txt.startswith('args: -p --model sonnet --'), txt
-assert txt.endswith('segunda "linea"') and 'di hola' in txt, txt
-assert ev[0]["type"] == "step_start" and ev[-1]["type"] == "step_finish"
+assert txt.startswith("args: -p --output-format stream-json --verbose --model sonnet --") and "di hola" in txt, txt
+assert ev[-1]["part"]["tokens"] == {"input": 5, "output": 7, "reasoning": 0}, ev[-1]
 PY
+  # fallo de claude: el error incluye su stderr y el código de salida es 1
+  set +e
+  salida=$(cd "$cfgdir" && FAKE_CLAUDE_FAIL=1 PATH="$fakebin:$PATH" "$bin" run --format json --model claude:sonnet "di hola"); rc=$?
+  set -e
+  python3 - "$salida" "$rc" <<'PY' || { echo "FALLO: claude -p con error" >&2; exit 1; }
+import json, sys
+ev = [json.loads(l) for l in sys.argv[1].splitlines()]
+err = [e for e in ev if e["type"] == "error"]
+assert err and "código 4" in err[0]["error"]["data"]["message"] and "boom en stderr" in err[0]["error"]["data"]["message"], err
+assert ev[-1]["type"] == "step_finish" and ev[-1]["part"]["reason"] == "error"
+assert sys.argv[2] == "1", sys.argv[2]
+PY
+  # sin claude en el PATH
+  set +e
+  salida=$(cd "$cfgdir" && PATH="/nonexistent" "$bin" run --format json --model claude:sonnet "di hola"); rc=$?
+  set -e
+  case "$salida" in *"no se pudo lanzar claude"*) ;; *) echo "FALLO: claude ausente: $salida" >&2; exit 1;; esac
   echo "OK claude -p"
 fi
 

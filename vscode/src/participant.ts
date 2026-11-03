@@ -70,6 +70,8 @@ export function registerParticipant(ctx: vscode.ExtensionContext, state: State):
             stream.progress(`subagente: ${e.event.tool}`);
           } else if (e.kind === 'permission') {
             void askPermission(e.title).then((r) => run.reply(e.id, r));
+          } else if (e.kind === 'status') {
+            stream.progress(e.text);
           } else if (e.kind === 'error') {
             stream.markdown(`**Error:** ${e.message}\n\n`);
           }

@@ -215,6 +215,7 @@
       const e = m.event;
       if (e.kind === 'text') renderText(e.text);
       else if (e.kind === 'text_delta') delta(e.text);
+      else if (e.kind === 'status') add('meta', e.text);
       else if (e.kind === 'error') add('error', e.message);
       else if (e.kind === 'tool') toolEvent(e);
       else if (e.kind === 'todo') todos(e.todos);

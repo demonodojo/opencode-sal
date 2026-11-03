@@ -10,7 +10,11 @@ const bin = path.resolve(__dirname, '../../../out/linux/bin/supercoder');
 
 test('startRun lanza supercoder con claude -p y entrega eventos', { skip: !fs.existsSync(bin) }, async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sc-'));
-  fs.writeFileSync(path.join(dir, 'claude'), '#!/bin/sh\necho "args: $*"\n', { mode: 0o755 });
+  fs.writeFileSync(
+    path.join(dir, 'claude'),
+    '#!/bin/sh\nprintf \'{"type":"assistant","message":{"content":[{"type":"text","text":"args: %s"}]}}\\n\' "$*"\necho \'{"type":"result","is_error":false,"result":"x","usage":{"input_tokens":1,"output_tokens":2}}\'\n',
+    { mode: 0o755 },
+  );
   process.env.PATH = `${dir}:${process.env.PATH}`;
   const events: SuperEvent[] = [];
   const code = await new Promise<number | null>((resolve) =>
@@ -25,9 +29,10 @@ test('startRun lanza supercoder con claude -p y entrega eventos', { skip: !fs.ex
     }),
   );
   assert.equal(code, 0);
-  assert.deepEqual(events.map((e) => e.kind), ['step_start', 'text', 'step_finish']);
+  assert.deepEqual(events.map((e) => e.kind).filter((k) => k !== 'status'), ['step_start', 'text', 'step_finish']);
+  assert.equal(events.some((e) => e.kind === 'status'), true);
   const text = events.find((e) => e.kind === 'text');
-  assert.equal(text && text.kind === 'text' && text.text.startsWith('args: -p --model sonnet --'), true);
+  assert.equal(text && text.kind === 'text' && text.text.startsWith('args: -p --output-format stream-json --verbose --model sonnet --'), true);
 });
 
 test('startRun informa si el binario no existe', async () => {
