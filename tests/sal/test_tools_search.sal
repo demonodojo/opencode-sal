@@ -71,7 +71,7 @@ fn main() -> Int ! io, alloc
     f = f + ck_contains(&tr_output(&r6), &"Found 1 match in 1 file", 17)
 
     c = ctx_new()
-    x = ctx_set_shell(&mut c, &"/bin/sh")
+    rsh = ctx_set_shell(&mut c, &"/bin/sh")
     b = jb(&c, &"{\"command\":\"echo hi; echo err 1>&2\"}")
     f = f + ck_int(tr_failed(&b), 0, 20)
     f = f + ck_str(&tr_output(&b), &"hi\nerr\n", 21)
