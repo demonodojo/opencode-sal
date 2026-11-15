@@ -76,7 +76,7 @@ Reglas de `"permission"` en `supercoder.json` y del agente (`allow|ask|deny`; en
 
 ## Convenciones de Sal que importan aquí
 
-Sin structs multicampo: asas `vec` y accesores. Cada función con efectos propios los declara. Los nombres de módulos importados se aplanan: prefijar. Las cadenas se mueven al asignar (copiar con `str_slice(s, 0, str_len(s))`). `on` y `from` están reservadas. `{{`/`}}` para llaves literales. La memoria no se libera: acumular con `x = x + …`.
+Sin structs multicampo: asas `vec` y accesores. Cada función con efectos propios los declara. Los nombres de módulos importados se aplanan: prefijar. Las cadenas se mueven al asignar (copiar con `str_slice(s, 0, str_len(s))`). `on` y `from` están reservadas. `{` y `}` dentro de una cadena son literales. La memoria no se libera: acumular con `x = x + …`.
 
 ## Skills y herramientas: detalles que pesan
 

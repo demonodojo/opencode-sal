@@ -1,0 +1,28 @@
+# Codificación de los informes OSC 7501: mensajes de una línea, base64 y truncado UTF-8.
+
+import "../src/osc.sal"
+
+fn osc_fail(code: Int) -> Int ! io, alloc
+    msg = "FAIL #" + int_to_str(code)
+    _w = Fd.new(2).write_str(&msg)
+    1
+
+fn main() -> Int ! io, alloc
+    f = 0
+    if osc_msg(&"hola\nmundo").eq("hola mundo") == 0
+        f = f + osc_fail(1)
+    if osc_msg(&"  a\t\tb  ").eq("a b") == 0
+        f = f + osc_fail(2)
+    if osc_truncate(&"ábc", 3).eq("áb") == 0
+        f = f + osc_fail(3)
+    if osc_truncate(&"abc", 5).eq("abc") == 0
+        f = f + osc_fail(4)
+    if osc_seq(&"state=done").len() != 19
+        f = f + osc_fail(5)
+    if osc_body(&"working", &"Hola").eq("state=working:app=supercoder:msg=SG9sYQ==") == 0
+        f = f + osc_fail(6)
+    if osc_body(&"idle", &"").eq("state=idle:app=supercoder") == 0
+        f = f + osc_fail(7)
+    if osc_body(&"blocked", &"").eq("state=blocked:app=supercoder") == 0
+        f = f + osc_fail(8)
+    f

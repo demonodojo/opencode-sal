@@ -5,7 +5,7 @@ import "io/pipe.sal"
 fn claude_prefix() -> String
     "claude:"
 
-fn claude_has_prefix(model: String) -> Int ! alloc
+fn claude_has_prefix(model: &String) -> Int ! alloc
     n = str_len(claude_prefix())
     if str_len(model) < n
         0
@@ -13,31 +13,31 @@ fn claude_has_prefix(model: String) -> Int ! alloc
         str_eq(str_slice(model, 0, n), claude_prefix())
 
 # "claude:sonnet" -> "sonnet"; un modelo sin prefijo se pasa tal cual.
-fn claude_model_arg(model: String) -> String ! alloc
-    if claude_has_prefix(model) != 0
+fn claude_model_arg(model: &String) -> String ! alloc
+    if claude_has_prefix(&model) != 0
         str_slice(model, str_len(claude_prefix()), str_len(model))
     else
-        model
+        model.dup()
 
-fn claude_argv_tab(model: String, prompt: String) -> Bytes ! alloc
+fn claude_argv_tab(model: &String, prompt: &String) -> Bytes ! alloc
     if str_len(model) > 0
         tab = bytes_new(96)
-        _0 = spawn_argv_slot_ptr(tab, 0, spawn_string_buf("claude"), 6)
-        _1 = spawn_argv_slot_ptr(tab, 1, spawn_string_buf("-p"), 2)
-        _2 = spawn_argv_slot_ptr(tab, 2, spawn_string_buf("--model"), 7)
-        _3 = spawn_argv_slot_ptr(tab, 3, spawn_string_buf(model), str_len(model))
-        _4 = spawn_argv_slot_ptr(tab, 4, spawn_string_buf("--"), 2)
-        _5 = spawn_argv_slot_ptr(tab, 5, spawn_string_buf(prompt), str_len(prompt))
+        _0 = spawn_argv_slot_ptr(&tab, 0, &spawn_string_buf(&"claude"), 6)
+        _1 = spawn_argv_slot_ptr(&tab, 1, &spawn_string_buf(&"-p"), 2)
+        _2 = spawn_argv_slot_ptr(&tab, 2, &spawn_string_buf(&"--model"), 7)
+        _3 = spawn_argv_slot_ptr(&tab, 3, &spawn_string_buf(&model), str_len(model))
+        _4 = spawn_argv_slot_ptr(&tab, 4, &spawn_string_buf(&"--"), 2)
+        _5 = spawn_argv_slot_ptr(&tab, 5, &spawn_string_buf(&prompt), str_len(prompt))
         tab
     else
         tab = bytes_new(64)
-        _0 = spawn_argv_slot_ptr(tab, 0, spawn_string_buf("claude"), 6)
-        _1 = spawn_argv_slot_ptr(tab, 1, spawn_string_buf("-p"), 2)
-        _2 = spawn_argv_slot_ptr(tab, 2, spawn_string_buf("--"), 2)
-        _3 = spawn_argv_slot_ptr(tab, 3, spawn_string_buf(prompt), str_len(prompt))
+        _0 = spawn_argv_slot_ptr(&tab, 0, &spawn_string_buf(&"claude"), 6)
+        _1 = spawn_argv_slot_ptr(&tab, 1, &spawn_string_buf(&"-p"), 2)
+        _2 = spawn_argv_slot_ptr(&tab, 2, &spawn_string_buf(&"--"), 2)
+        _3 = spawn_argv_slot_ptr(&tab, 3, &spawn_string_buf(&prompt), str_len(prompt))
         tab
 
-fn claude_argc(model: String) -> Int
+fn claude_argc(model: &String) -> Int
     if str_len(model) > 0
         6
     else
@@ -54,21 +54,22 @@ fn claude_trim_end(s: String) -> String ! alloc
         s
 
 # Ejecuta `claude -p` y devuelve su stdout; "" si no pudo lanzarse.
-fn claude_run(model: String, prompt: String) -> String ! io, alloc
-    pp = pipe_create()
-    if pp < 0
+fn claude_run(model: &String, prompt: &String) -> String ! io, alloc
+    packed = pipe_create_go()
+    if packed < 0
         ""
     else
-        rd = pipe_read_fd(pp)
-        wr = pipe_write_fd(pp)
-        m = claude_model_arg(model)
-        pid = spawn_io_argv("claude", claude_argc(m), claude_argv_tab(m, prompt), spawn_fd_closed(), wr, 2, "", 0)
-        _cw = close_fd(wr)
+        pp = Pipe.from_packed(packed)
+        rd = pp.read_fd()
+        wr = pp.write_fd()
+        m = claude_model_arg(&model)
+        pid = spawn_io_argv(&"claude", claude_argc(&m), &claude_argv_tab(&m, &prompt), SPAWN_FD_CLOSED, wr, 2, &"", 0)
+        _cw = Fd.new(wr).close()
         if pid < 0
-            _cr = close_fd(rd)
+            _cr = Fd.new(rd).close()
             ""
         else
-            out = read_fd_all(rd, 4194304)
+            out = read_fd_all_go(rd, 4194304)
             _st = wait_pid(pid)
-            _cr = close_fd(rd)
+            _cr = Fd.new(rd).close()
             claude_trim_end(out)

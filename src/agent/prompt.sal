@@ -13,29 +13,29 @@ fn prompt_base() -> String ! alloc
 
 # Plataforma: soso si existe su shell, linux en otro caso.
 fn prompt_platform() -> String ! io, alloc
-    if fsx_exists("/bin/sosh") != 0
+    if fsx_exists(&"/bin/sosh") != 0
         "soso"
     else
         "linux"
 
-fn prompt_env(c: Int) -> String ! io, alloc
+fn prompt_env(c: &Ctx) -> String ! io, alloc
     nl = char_to_str(10)
     "# Environment" + nl + "Working directory: " + cwd_path() + nl + "Platform: " + prompt_platform() + nl + "Shell: " + ctx_shell(c) + nl + "Today's date: " + today_str()
 
 # Instrucciones del proyecto: AGENTS.md o, si no existe, CLAUDE.md (máx. 20000 bytes).
 fn prompt_project_rules() -> String ! io, alloc
     name = "AGENTS.md"
-    text = fsx_read_text_max(name, 20000)
-    if str_len(sk_trim(text)) == 0
+    text = fsx_read_text_max(&name, 20000)
+    if str_len(sk_trim(&text)) == 0
         name = "CLAUDE.md"
-        text = fsx_read_text_max(name, 20000)
-    if str_len(sk_trim(text)) == 0
+        text = fsx_read_text_max(&name, 20000)
+    if str_len(sk_trim(&text)) == 0
         return ""
     nl = char_to_str(10)
     "# Project instructions (" + name + ")" + nl + text
 
 # Compone el prompt completo. `extra` es el prompt propio del agente (puede ser "").
-fn prompt_build(c: Int, extra: String) -> String ! io, alloc
+fn prompt_build(c: &Ctx, extra: &String) -> String ! io, alloc
     nl = char_to_str(10)
     out = prompt_base()
     if str_len(extra) > 0

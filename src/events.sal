@@ -14,100 +14,100 @@ fn ev_tui_log_path() -> String
     "/tmp/supercoder-sal-tui.log"
 
 fn ev_tui_log_reset() -> Int ! io, alloc
-    fsx_write(ev_tui_log_path(), "")
+    fsx_write(&ev_tui_log_path(), &"")
 
-fn ev_tui_log_add(line: String) -> Int ! io, alloc
-    fsx_append(ev_tui_log_path(), line + "\n")
+fn ev_tui_log_add(line: &String) -> Int ! io, alloc
+    fsx_append(&ev_tui_log_path(), &(line + "\n"))
 
 fn ev_tui_log_read() -> String ! io, alloc
-    fsx_read_text(ev_tui_log_path())
+    fsx_read_text(&ev_tui_log_path())
 
 # Escribe un evento JSON: {"type":..,"timestamp":..,"sessionID":..,"part":{..}}
-fn ev_json(c: Int, type: String, part_json: String) -> Int ! io, alloc
-    head = jb_kv("type", json_quote(type)) + "," + jb_kv("timestamp", int_to_str(now_ms())) + "," + jb_kv("sessionID", json_quote(ctx_session(c)))
-    line = jb_obj(head + "," + jb_kv("part", part_json)) + "\n"
-    write_str_fd(1, line)
+fn ev_json(c: &Ctx, type: &String, part_json: &String) -> Int ! io, alloc
+    head = jb_kv(&"type", &json_quote(&type)) + "," + jb_kv(&"timestamp", &int_to_str(now_ms())) + "," + jb_kv(&"sessionID", &json_quote(&ctx_session(c)))
+    line = jb_obj(&(head + "," + jb_kv(&"part", &part_json))) + "\n"
+    Fd.new(1).write_str(&line)
 
-fn ev_step_start(c: Int) -> Int ! io, alloc
+fn ev_step_start(c: &Ctx) -> Int ! io, alloc
     if ctx_out(c) == 1
-        return ev_json(c, "step_start", jb_obj(jb_kv("type", json_quote("step-start"))))
+        return ev_json(c, &"step_start", &jb_obj(&jb_kv(&"type", &json_quote(&"step-start"))))
     0
 
 # reason: "stop" | "tool-calls" | "error"
-fn ev_step_finish(c: Int, reason: String, inp: Int, out: Int) -> Int ! io, alloc
+fn ev_step_finish(c: &Ctx, reason: &String, inp: Int, out: Int) -> Int ! io, alloc
     if ctx_out(c) == 1
-        tokens = jb_obj(jb_kv("input", int_to_str(inp)) + "," + jb_kv("output", int_to_str(out)) + "," + jb_kv("reasoning", "0"))
-        part = jb_obj(jb_kv("type", json_quote("step-finish")) + "," + jb_kv("reason", json_quote(reason)) + "," + jb_kv("tokens", tokens))
-        return ev_json(c, "step_finish", part)
+        tokens = jb_obj(&(jb_kv(&"input", &int_to_str(inp)) + "," + jb_kv(&"output", &int_to_str(out)) + "," + jb_kv(&"reasoning", &"0")))
+        part = jb_obj(&(jb_kv(&"type", &json_quote(&"step-finish")) + "," + jb_kv(&"reason", &json_quote(&reason)) + "," + jb_kv(&"tokens", &tokens)))
+        return ev_json(c, &"step_finish", &part)
     0
 
-fn ev_text(c: Int, text: String) -> Int ! io, alloc
+fn ev_text(c: &Ctx, text: &String) -> Int ! io, alloc
     if ctx_out(c) == 2
-        return ev_tui_log_add(text)
+        return ev_tui_log_add(&text)
     if ctx_out(c) == 1
-        part = jb_obj(jb_kv("type", json_quote("text")) + "," + jb_kv("text", json_quote(text)))
-        return ev_json(c, "text", part)
-    write_str_fd(1, text + "\n")
+        part = jb_obj(&(jb_kv(&"type", &json_quote(&"text")) + "," + jb_kv(&"text", &json_quote(&text))))
+        return ev_json(c, &"text", &part)
+    Fd.new(1).write_str(&(text + "\n"))
 
 # Herramienta: status "running" | "completed" | "error". `input_json` es el objeto de
 # argumentos (JSON); `output` es el resultado o el mensaje de error.
-fn ev_tool(c: Int, call_id: String, tool: String, status: String, input_json: String, output: String, title: String) -> Int ! io, alloc
+fn ev_tool(c: &Ctx, call_id: &String, tool: &String, status: &String, input_json: &String, output: &String, title: &String) -> Int ! io, alloc
     if ctx_out(c) == 2
         if str_eq(status, "running") != 0
-            return ev_tui_log_add("tool " + tool)
+            return ev_tui_log_add(&("tool " + tool))
         return 0
     if ctx_out(c) == 1
-        st = jb_kv("status", json_quote(status)) + "," + jb_kv("input", input_json)
+        st = jb_kv(&"status", &json_quote(&status)) + "," + jb_kv(&"input", &input_json)
         if str_eq(status, "completed") != 0
-            st = st + "," + jb_kv("output", json_quote(output)) + "," + jb_kv("title", json_quote(title))
+            st = st + "," + jb_kv(&"output", &json_quote(&output)) + "," + jb_kv(&"title", &json_quote(&title))
         if str_eq(status, "error") != 0
-            st = st + "," + jb_kv("error", json_quote(output))
-        part = jb_obj(jb_kv("type", json_quote("tool")) + "," + jb_kv("callID", json_quote(call_id)) + "," + jb_kv("tool", json_quote(tool)) + "," + jb_kv("state", jb_obj(st)))
-        return ev_json(c, "tool_use", part)
+            st = st + "," + jb_kv(&"error", &json_quote(&output))
+        part = jb_obj(&(jb_kv(&"type", &json_quote(&"tool")) + "," + jb_kv(&"callID", &json_quote(&call_id)) + "," + jb_kv(&"tool", &json_quote(&tool)) + "," + jb_kv(&"state", &jb_obj(&st))))
+        return ev_json(c, &"tool_use", &part)
     if str_eq(status, "running") != 0
-        return write_str_fd(2, "[" + tool + "] " + title + "\n")
+        return Fd.new(2).write_str(&("[" + tool + "] " + title + "\n"))
     0
 
-fn ev_error(c: Int, msg: String) -> Int ! io, alloc
+fn ev_error(c: &Ctx, msg: &String) -> Int ! io, alloc
     if ctx_out(c) == 2
-        return ev_tui_log_add("error: " + msg)
+        return ev_tui_log_add(&("error: " + msg))
     if ctx_out(c) == 1
-        head = jb_kv("type", json_quote("error")) + "," + jb_kv("timestamp", int_to_str(now_ms())) + "," + jb_kv("sessionID", json_quote(ctx_session(c)))
-        data = jb_obj(jb_kv("message", json_quote(msg)))
-        err = jb_obj(jb_kv("name", json_quote("Error")) + "," + jb_kv("data", data))
-        return write_str_fd(1, jb_obj(head + "," + jb_kv("error", err)) + "\n")
-    write_str_fd(2, "error: " + msg + "\n")
+        head = jb_kv(&"type", &json_quote(&"error")) + "," + jb_kv(&"timestamp", &int_to_str(now_ms())) + "," + jb_kv(&"sessionID", &json_quote(&ctx_session(c)))
+        data = jb_obj(&jb_kv(&"message", &json_quote(&msg)))
+        err = jb_obj(&(jb_kv(&"name", &json_quote(&"Error")) + "," + jb_kv(&"data", &data)))
+        return Fd.new(1).write_str(&(jb_obj(&(head + "," + jb_kv(&"error", &err))) + "\n"))
+    Fd.new(2).write_str(&("error: " + msg + "\n"))
 
 # Petición de permiso al cliente (solo con --format json): se responde por stdin con
 # {"type":"permission_reply","id":..,"reply":"once|always|reject"}.
-fn ev_permission(c: Int, id: String, call_id: String, tool: String, title: String, input_json: String) -> Int ! io, alloc
+fn ev_permission(c: &Ctx, id: &String, call_id: &String, tool: &String, title: &String, input_json: &String) -> Int ! io, alloc
     if ctx_out(c) == 1
-        part = jb_obj(jb_kv("id", json_quote(id)) + "," + jb_kv("callID", json_quote(call_id)) + "," + jb_kv("tool", json_quote(tool)) + "," + jb_kv("title", json_quote(title)) + "," + jb_kv("input", input_json))
-        return ev_json(c, "permission_request", part)
+        part = jb_obj(&(jb_kv(&"id", &json_quote(&id)) + "," + jb_kv(&"callID", &json_quote(&call_id)) + "," + jb_kv(&"tool", &json_quote(&tool)) + "," + jb_kv(&"title", &json_quote(&title)) + "," + jb_kv(&"input", &input_json)))
+        return ev_json(c, &"permission_request", &part)
     0
 
 # Lista de tareas actualizada (`todos_json` es un array JSON).
-fn ev_todo(c: Int, todos_json: String) -> Int ! io, alloc
+fn ev_todo(c: &Ctx, todos_json: &String) -> Int ! io, alloc
     if ctx_out(c) == 1
-        return ev_json(c, "todo", jb_obj(jb_kv("todos", todos_json)))
+        return ev_json(c, &"todo", &jb_obj(&jb_kv(&"todos", &todos_json)))
     0
 
 # Evento de un subagente reenviado por el agente padre; `event_json` es la línea original.
-fn ev_subagent(c: Int, call_id: String, event_json: String) -> Int ! io, alloc
+fn ev_subagent(c: &Ctx, call_id: &String, event_json: &String) -> Int ! io, alloc
     if ctx_out(c) == 1
-        return ev_json(c, "subagent", jb_obj(jb_kv("callID", json_quote(call_id)) + "," + jb_kv("event", event_json)))
+        return ev_json(c, &"subagent", &jb_obj(&(jb_kv(&"callID", &json_quote(&call_id)) + "," + jb_kv(&"event", &event_json))))
     0
 
 # Fragmento de texto del modelo mientras se genera (solo con --format json y "stream": true).
-fn ev_text_delta(c: Int, text: String) -> Int ! io, alloc
+fn ev_text_delta(c: &Ctx, text: &String) -> Int ! io, alloc
     if ctx_out(c) == 1
-        return ev_json(c, "text_delta", jb_obj(jb_kv("type", json_quote("text-delta")) + "," + jb_kv("text", json_quote(text))))
+        return ev_json(c, &"text_delta", &jb_obj(&(jb_kv(&"type", &json_quote(&"text-delta")) + "," + jb_kv(&"text", &json_quote(&text)))))
     0
 
 # Mensaje de estado del agente o del proveedor (arranque, "sigue en marcha"...). No lo lee runner.rs.
-fn ev_status(c: Int, msg: String) -> Int ! io, alloc
+fn ev_status(c: &Ctx, msg: &String) -> Int ! io, alloc
     if ctx_out(c) == 2
-        return ev_tui_log_add("· " + msg)
+        return ev_tui_log_add(&("· " + msg))
     if ctx_out(c) == 1
-        return ev_json(c, "status", jb_obj(jb_kv("text", json_quote(msg))))
-    write_str_fd(2, "· " + msg + "\n")
+        return ev_json(c, &"status", &jb_obj(&jb_kv(&"text", &json_quote(&msg))))
+    Fd.new(2).write_str(&("· " + msg + "\n"))

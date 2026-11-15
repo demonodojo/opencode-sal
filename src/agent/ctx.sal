@@ -1,190 +1,230 @@
-# Contexto de una ejecución del agente: un vec cuyas ranuras se leen con estos accesores.
+# Contexto de una ejecución del agente: un struct con campos tipados.
 
-fn ctx_new() -> Int ! alloc
-    c = vec_new()
-    i = 0
-    while i < 32
-        x = vec_push(c, 0)
-        i = i + 1
-    # Las ranuras de cadena empiezan vacías (un puntero nulo rompería str_len).
-    e = str_as_int(strdup(""))
-    x = vec_set(c, 1, e)
-    x = vec_set(c, 3, e)
-    x = vec_set(c, 6, e)
-    x = vec_set(c, 11, e)
-    x = vec_set(c, 12, e)
-    x = vec_set(c, 13, e)
-    x = vec_set(c, 18, e)
-    x = vec_set(c, 19, e)
-    x = vec_set(c, 21, e)
-    x = vec_set(c, 22, e)
-    x = vec_set(c, 23, e)
-    x = vec_set(c, 24, e)
-    c
+import "src/config.sal"
 
-fn ctx_cfg(c: Int) -> Int
-    vec_get(c, 0)
+struct Ctx
+    cfg: Cfg
+    model: String
+    msgs: List[String]
+    session: String
+    out: Int
+    max_turns: Int
+    agent: String
+    in_tokens: Int
+    out_tokens: Int
+    interactive: Int
+    yes: Int
+    shell: String
+    system: String
+    tools: String
+    next_call: Int
+    step: Int
+    vision: Int
+    depth: Int
+    allow: String
+    todos: String
+    turns: Int
+    call: String
+    grants: String
+    agent_perm: String
+    pending: String
+    osc: Int
 
-fn ctx_set_cfg(c: Int, v: Int) -> Int
-    vec_set(c, 0, v)
+fn ctx_new() -> Ctx ! alloc
+    Ctx(Cfg(""), d"", List.new[String](), d"", 0, 0, d"", 0, 0, 0, 0, d"", d"", d"", 0, 0, 0, 0, d"", d"", 0, d"", d"", d"", d"", 0)
 
-fn ctx_model(c: Int) -> String
-    str_from_int(vec_get(c, 1))
+fn ctx_cfg(c: &Ctx) -> &Cfg
+    &c.cfg
 
-fn ctx_set_model(c: Int, v: String) -> Int
-    vec_set(c, 1, str_as_int(v))
+fn ctx_set_cfg(c: &mut Ctx, v: Cfg) -> Int
+    c.cfg = v
+    0
+
+fn ctx_model(c: &Ctx) -> String ! alloc
+    c.model.dup()
+
+fn ctx_set_model(c: &mut Ctx, v: &String) -> Int ! alloc
+    c.model = v.dup()
+    0
 
 # Historial: lista de mensajes JSON (sin el de sistema).
-fn ctx_msgs(c: Int) -> Int
-    vec_get(c, 2)
+fn ctx_msgs(c: &Ctx) -> &List[String]
+    &c.msgs
 
-fn ctx_set_msgs(c: Int, v: Int) -> Int
-    vec_set(c, 2, v)
+fn ctx_msgs_mut(c: &mut Ctx) -> &mut List[String]
+    &mut c.msgs
 
-fn ctx_session(c: Int) -> String
-    str_from_int(vec_get(c, 3))
+fn ctx_set_msgs(c: &mut Ctx, v: List[String]) -> Int
+    c.msgs = v
+    0
 
-fn ctx_set_session(c: Int, v: String) -> Int
-    vec_set(c, 3, str_as_int(v))
+fn ctx_session(c: &Ctx) -> String ! alloc
+    c.session.dup()
+
+fn ctx_set_session(c: &mut Ctx, v: &String) -> Int ! alloc
+    c.session = v.dup()
+    0
 
 # Modo de salida: 0 texto, 1 JSON por líneas, 2 TUI (registro en fichero).
-fn ctx_out(c: Int) -> Int
-    vec_get(c, 4)
+fn ctx_out(c: &Ctx) -> Int
+    c.out
 
-fn ctx_set_out(c: Int, v: Int) -> Int
-    vec_set(c, 4, v)
+fn ctx_set_out(c: &mut Ctx, v: Int) -> Int
+    c.out = v
+    0
 
-fn ctx_max_turns(c: Int) -> Int
-    vec_get(c, 5)
+fn ctx_max_turns(c: &Ctx) -> Int
+    c.max_turns
 
-fn ctx_set_max_turns(c: Int, v: Int) -> Int
-    vec_set(c, 5, v)
+fn ctx_set_max_turns(c: &mut Ctx, v: Int) -> Int
+    c.max_turns = v
+    0
 
-fn ctx_agent(c: Int) -> String
-    str_from_int(vec_get(c, 6))
+fn ctx_agent(c: &Ctx) -> String ! alloc
+    c.agent.dup()
 
-fn ctx_set_agent(c: Int, v: String) -> Int
-    vec_set(c, 6, str_as_int(v))
+fn ctx_set_agent(c: &mut Ctx, v: &String) -> Int ! alloc
+    c.agent = v.dup()
+    0
 
-fn ctx_in_tokens(c: Int) -> Int
-    vec_get(c, 7)
+fn ctx_in_tokens(c: &Ctx) -> Int
+    c.in_tokens
 
-fn ctx_out_tokens(c: Int) -> Int
-    vec_get(c, 8)
+fn ctx_out_tokens(c: &Ctx) -> Int
+    c.out_tokens
 
-fn ctx_add_tokens(c: Int, i: Int, o: Int) -> Int
-    x = vec_set(c, 7, vec_get(c, 7) + i)
-    vec_set(c, 8, vec_get(c, 8) + o)
+fn ctx_add_tokens(c: &mut Ctx, i: Int, o: Int) -> Int
+    c.in_tokens = c.in_tokens + i
+    c.out_tokens = c.out_tokens + o
+    0
 
 # 1 si hay un cliente que responde a las peticiones de permiso por stdin.
-fn ctx_interactive(c: Int) -> Int
-    vec_get(c, 9)
+fn ctx_interactive(c: &Ctx) -> Int
+    c.interactive
 
-fn ctx_set_interactive(c: Int, v: Int) -> Int
-    vec_set(c, 9, v)
+fn ctx_set_interactive(c: &mut Ctx, v: Int) -> Int
+    c.interactive = v
+    0
 
 # 1 si se aprueban sin preguntar los permisos "ask".
-fn ctx_yes(c: Int) -> Int
-    vec_get(c, 10)
+fn ctx_yes(c: &Ctx) -> Int
+    c.yes
 
-fn ctx_set_yes(c: Int, v: Int) -> Int
-    vec_set(c, 10, v)
+fn ctx_set_yes(c: &mut Ctx, v: Int) -> Int
+    c.yes = v
+    0
 
-fn ctx_shell(c: Int) -> String
-    str_from_int(vec_get(c, 11))
+fn ctx_shell(c: &Ctx) -> String ! alloc
+    c.shell.dup()
 
-fn ctx_set_shell(c: Int, v: String) -> Int
-    vec_set(c, 11, str_as_int(v))
+fn ctx_set_shell(c: &mut Ctx, v: &String) -> Int ! alloc
+    c.shell = v.dup()
+    0
 
 # Prompt de sistema del turno.
-fn ctx_system(c: Int) -> String
-    str_from_int(vec_get(c, 12))
+fn ctx_system(c: &Ctx) -> String ! alloc
+    c.system.dup()
 
-fn ctx_set_system(c: Int, v: String) -> Int
-    vec_set(c, 12, str_as_int(v))
+fn ctx_set_system(c: &mut Ctx, v: &String) -> Int ! alloc
+    c.system = v.dup()
+    0
 
 # Definiciones de herramientas (array JSON) que se envían al modelo.
-fn ctx_tools(c: Int) -> String
-    str_from_int(vec_get(c, 13))
+fn ctx_tools(c: &Ctx) -> String ! alloc
+    c.tools.dup()
 
-fn ctx_set_tools(c: Int, v: String) -> Int
-    vec_set(c, 13, str_as_int(v))
+fn ctx_set_tools(c: &mut Ctx, v: &String) -> Int ! alloc
+    c.tools = v.dup()
+    0
 
 # Contador de llamadas a herramientas (para ids call_N).
-fn ctx_next_call(c: Int) -> Int
-    n = vec_get(c, 14) + 1
-    x = vec_set(c, 14, n)
-    n
+fn ctx_next_call(c: &mut Ctx) -> Int
+    c.next_call = c.next_call + 1
+    c.next_call
 
-fn ctx_step(c: Int) -> Int
-    vec_get(c, 15)
+fn ctx_step(c: &Ctx) -> Int
+    c.step
 
-fn ctx_inc_step(c: Int) -> Int
-    n = vec_get(c, 15) + 1
-    x = vec_set(c, 15, n)
-    n
+fn ctx_inc_step(c: &mut Ctx) -> Int
+    c.step = c.step + 1
+    c.step
 
 # 1 si el modelo del turno acepta imágenes.
-fn ctx_vision(c: Int) -> Int
-    vec_get(c, 16)
+fn ctx_vision(c: &Ctx) -> Int
+    c.vision
 
-fn ctx_set_vision(c: Int, v: Int) -> Int
-    vec_set(c, 16, v)
+fn ctx_set_vision(c: &mut Ctx, v: Int) -> Int
+    c.vision = v
+    0
 
 # Profundidad de subagente (0 = agente principal).
-fn ctx_depth(c: Int) -> Int
-    vec_get(c, 17)
+fn ctx_depth(c: &Ctx) -> Int
+    c.depth
 
-fn ctx_set_depth(c: Int, v: Int) -> Int
-    vec_set(c, 17, v)
+fn ctx_set_depth(c: &mut Ctx, v: Int) -> Int
+    c.depth = v
+    0
 
 # Lista de herramientas permitidas para el agente ("" = todas), separadas por comas.
-fn ctx_allow(c: Int) -> String
-    str_from_int(vec_get(c, 18))
+fn ctx_allow(c: &Ctx) -> String ! alloc
+    c.allow.dup()
 
-fn ctx_set_allow(c: Int, v: String) -> Int
-    vec_set(c, 18, str_as_int(v))
+fn ctx_set_allow(c: &mut Ctx, v: &String) -> Int ! alloc
+    c.allow = v.dup()
+    0
 
 # Estado de las listas de tareas (array JSON como texto).
-fn ctx_todos(c: Int) -> String
-    str_from_int(vec_get(c, 19))
+fn ctx_todos(c: &Ctx) -> String ! alloc
+    c.todos.dup()
 
-fn ctx_set_todos(c: Int, v: String) -> Int
-    vec_set(c, 19, str_as_int(v))
+fn ctx_set_todos(c: &mut Ctx, v: &String) -> Int ! alloc
+    c.todos = v.dup()
+    0
 
 # Número de turnos del modelo ya realizados.
-fn ctx_turns(c: Int) -> Int
-    vec_get(c, 20)
+fn ctx_turns(c: &Ctx) -> Int
+    c.turns
 
-fn ctx_inc_turns(c: Int) -> Int
-    n = vec_get(c, 20) + 1
-    x = vec_set(c, 20, n)
-    n
+fn ctx_inc_turns(c: &mut Ctx) -> Int
+    c.turns = c.turns + 1
+    c.turns
 
 # Identificador de la llamada a herramienta en curso (lo usan los permisos).
-fn ctx_call(c: Int) -> String
-    str_from_int(vec_get(c, 21))
+fn ctx_call(c: &Ctx) -> String ! alloc
+    c.call.dup()
 
-fn ctx_set_call(c: Int, v: String) -> Int
-    vec_set(c, 21, str_as_int(v))
+fn ctx_set_call(c: &mut Ctx, v: &String) -> Int ! alloc
+    c.call = v.dup()
+    0
 
 # Permisos concedidos con "always": líneas "tipo<TAB>patrón".
-fn ctx_grants(c: Int) -> String
-    str_from_int(vec_get(c, 22))
+fn ctx_grants(c: &Ctx) -> String ! alloc
+    c.grants.dup()
 
-fn ctx_set_grants(c: Int, v: String) -> Int
-    vec_set(c, 22, str_as_int(v))
+fn ctx_set_grants(c: &mut Ctx, v: &String) -> Int ! alloc
+    c.grants = v.dup()
+    0
 
 # Reglas de permisos propias del agente: objeto JSON como texto ("" = ninguna).
-fn ctx_agent_perm(c: Int) -> String
-    str_from_int(vec_get(c, 23))
+fn ctx_agent_perm(c: &Ctx) -> String ! alloc
+    c.agent_perm.dup()
 
-fn ctx_set_agent_perm(c: Int, v: String) -> Int
-    vec_set(c, 23, str_as_int(v))
+fn ctx_set_agent_perm(c: &mut Ctx, v: &String) -> Int ! alloc
+    c.agent_perm = v.dup()
+    0
+
+# 1 si se emiten informes OSC 7501 también con --format json (--osc7501; lo usa la TUI).
+fn ctx_osc(c: &Ctx) -> Int
+    c.osc
+
+fn ctx_set_osc(c: &mut Ctx, v: Int) -> Int
+    c.osc = v
+    0
 
 # Imágenes leídas con `read` pendientes de adjuntar al historial (rutas, una por línea).
-fn ctx_pending(c: Int) -> String
-    str_from_int(vec_get(c, 24))
+fn ctx_pending(c: &Ctx) -> String ! alloc
+    c.pending.dup()
 
-fn ctx_set_pending(c: Int, v: String) -> Int
-    vec_set(c, 24, str_as_int(v))
+fn ctx_set_pending(c: &mut Ctx, v: &String) -> Int ! alloc
+    c.pending = v.dup()
+    0

@@ -6,163 +6,292 @@
 #   "models": {
 #     "soso-coder": { "host": "127.0.0.1", "port": 7422, "token_env": "SOSO_LLM_API_KEY",
 #                     "max_tokens": 4096, "vision": false, "context_chars": 60000 },
-#     "mi-claude":  { "provider": "claude" }
+#     "mi-claude":  { "provider": "claude" },
+#     "qwen":       { "provider": "ollama", "model_id": "qwen2.5-coder:7b", "vision": false }
 #   }
 # }
+#
+# LM Studio: igual con "lmstudio:NOMBRE" ($LMSTUDIO_HOST o 127.0.0.1:1234, sin token; si el
+# servidor exige clave, "token"/"token_env"). El nombre es el identificador del modelo cargado.
+#
+# Ollama: el modelo "ollama:NOMBRE" (p. ej. --model ollama:qwen2.5-coder:7b) habla con
+# Ollama sin configuración: usa $OLLAMA_HOST (host, host:port o http://host:port) o
+# 127.0.0.1:11434, sin token. "model_id" fija el nombre que se envía al servidor.
 #
 # Un modelo sin entrada usa 127.0.0.1:7422. Sin bloque "models", un ":7442" en el fichero
 # selecciona el puerto 7442 (formato antiguo). El asa de configuración es un vec: 0 doc, 1 texto.
 
+import "io/env.sal"
 import "salkit/json.sal"
 import "salkit/fsx.sal"
 import "salkit/strbuf.sal"
+import "salkit/int.sal"
 import "src/provider/claude.sal"
 
-fn cfg_load() -> Int ! io, alloc
-    raw = fsx_read_text("supercoder.json")
-    d = json_parse("{{}}")
+# Configuración leída de supercoder.json: se guarda el texto y se parsea bajo demanda.
+struct Cfg
+    raw: String
+
+fn cfg_load() -> Cfg ! io, alloc
+    Cfg(fsx_read_text(&"supercoder.json"))
+
+fn cfg_raw(c: &Cfg) -> &String
+    &c.raw
+
+# Documento de configuración: se parsea el texto guardado ("{}" si falta o es inválido).
+fn cfg_doc(c: &Cfg) -> JsonDoc ! alloc
+    raw = cfg_raw(c)
     if str_len(sk_trim(raw)) > 0
         parsed = json_parse(raw)
-        if json_ok(parsed) != 0
-            if json_is_object(parsed, json_root(parsed)) != 0
-                d = parsed
-    c = vec_new()
-    x = vec_push(c, d)
-    x = vec_push(c, str_as_int(raw))
-    c
+        if json_ok(&parsed) != 0
+            if json_is_object(&parsed, json_root(&parsed)) != 0
+                return parsed
+    json_parse(&"{}")
 
-fn cfg_doc(c: Int) -> Int
-    vec_get(c, 0)
-
-fn cfg_raw(c: Int) -> String
-    str_from_int(vec_get(c, 1))
-
-fn cfg_root(c: Int) -> Int
-    json_root(vec_get(c, 0))
+fn cfg_root(c: &Cfg) -> Int ! alloc
+    d = cfg_doc(c)
+    json_root(&d)
 
 # Valor de una clave de primer nivel como texto ("" si falta).
-fn cfg_top_str(c: Int, key: String) -> String
-    json_get_str(cfg_doc(c), cfg_root(c), key)
+fn cfg_top_str(c: &Cfg, key: &String) -> String ! alloc
+    d = cfg_doc(c)
+    json_get_str(&d, json_root(&d), &key).dup()
 
 # Nodo de la clave de primer nivel, o -1.
-fn cfg_top(c: Int, key: String) -> Int
-    json_get(cfg_doc(c), cfg_root(c), key)
+fn cfg_top(c: &Cfg, key: &String) -> Int ! alloc
+    d = cfg_doc(c)
+    json_get(&d, json_root(&d), &key)
 
 fn cfg_default_model() -> String
     "soso-coder"
 
 # Prioridad: --model > "model" del fichero > modelo por defecto.
-fn cfg_model_for(c: Int, flag: String) -> String ! alloc
+fn cfg_model_for(c: &Cfg, flag: &String) -> String ! alloc
     if str_len(flag) > 0
         return str_slice(flag, 0, str_len(flag))
-    m = cfg_top_str(c, "model")
+    m = cfg_top_str(c, &"model")
     if str_len(m) > 0
         return m
     cfg_default_model()
 
 # Nodo del bloque del modelo en "models", o -1.
-fn cfg_mnode(c: Int, model: String) -> Int
-    models = cfg_top(c, "models")
+fn cfg_mnode(c: &Cfg, model: &String) -> Int ! alloc
+    d = cfg_doc(c)
+    models = json_get(&d, json_root(&d), &"models")
     if models < 0
         return 0 - 1
-    json_get(cfg_doc(c), models, model)
+    json_get(&d, models, &model)
 
-fn cfg_has_models(c: Int) -> Int
-    if cfg_top(c, "models") >= 0
+fn cfg_has_models(c: &Cfg) -> Int ! alloc
+    if cfg_top(c, &"models") >= 0
         1
     else
         0
 
-fn cfg_mstr(c: Int, model: String, key: String, dflt: String) -> String ! alloc
-    n = cfg_mnode(c, model)
-    k = json_get(cfg_doc(c), n, key)
+fn cfg_mstr(c: &Cfg, model: &String, key: &String, dflt: String) -> String ! alloc
+    d = cfg_doc(c)
+    n = cfg_mnode_d(&d, &model)
+    k = json_get(&d, n, &key)
     if k < 0
         return dflt
-    if json_kind(cfg_doc(c), k) != 3
+    if json_kind(&d, k) != 3
         return dflt
-    json_str(cfg_doc(c), k)
+    json_str(&d, k).dup()
 
-fn cfg_mint(c: Int, model: String, key: String, dflt: Int) -> Int
-    n = cfg_mnode(c, model)
-    k = json_get(cfg_doc(c), n, key)
+fn cfg_mint(c: &Cfg, model: &String, key: &String, dflt: Int) -> Int ! alloc
+    d = cfg_doc(c)
+    n = cfg_mnode_d(&d, &model)
+    k = json_get(&d, n, &key)
     if k < 0
         return dflt
-    json_int(cfg_doc(c), k)
+    json_int(&d, k)
+
+# Nodo del bloque del modelo en un documento ya parseado, o -1.
+fn cfg_mnode_d(d: &JsonDoc, model: &String) -> Int
+    models = json_get(d, json_root(d), &"models")
+    if models < 0
+        return 0 - 1
+    json_get(&d, models, &model)
 
 # "claude" si el modelo usa `claude -p`; "openai" si habla HTTP con /v1/chat/completions.
-fn cfg_provider(c: Int, model: String) -> String ! alloc
-    if claude_has_prefix(model) != 0
+fn cfg_provider(c: &Cfg, model: &String) -> String ! alloc
+    if claude_has_prefix(&model) != 0
         return "claude"
-    p = cfg_mstr(c, model, "provider", "")
+    if ollama_has_prefix(&model) != 0
+        return "ollama"
+    if lmstudio_has_prefix(&model) != 0
+        return "lmstudio"
+    p = cfg_mstr(c, &model, &"provider", "")
     if str_eq(p, "claude") != 0
         return "claude"
+    if str_eq(p, "ollama") != 0
+        return "ollama"
+    if str_eq(p, "lmstudio") != 0
+        return "lmstudio"
     "openai"
 
-fn cfg_is_claude(c: Int, model: String) -> Int ! alloc
-    if str_eq(cfg_provider(c, model), "claude") != 0
+fn ollama_has_prefix(model: &String) -> Int ! alloc
+    if str_len(model) < 7
+        return 0
+    str_eq(str_slice(model, 0, 7), "ollama:")
+
+fn lmstudio_has_prefix(model: &String) -> Int ! alloc
+    if str_len(model) < 9
+        return 0
+    str_eq(str_slice(model, 0, 9), "lmstudio:")
+
+fn cfg_is_ollama(c: &Cfg, model: &String) -> Int ! alloc
+    if str_eq(cfg_provider(c, &model), "ollama") != 0
         1
     else
         0
 
-fn cfg_host(c: Int, model: String) -> String ! alloc
-    cfg_mstr(c, model, "host", "127.0.0.1")
+fn cfg_is_lmstudio(c: &Cfg, model: &String) -> Int ! alloc
+    if str_eq(cfg_provider(c, &model), "lmstudio") != 0
+        1
+    else
+        0
 
-fn cfg_port(c: Int, model: String) -> Int ! alloc
-    p = cfg_mint(c, model, "port", 0)
+# Servidor local sin token por defecto (Ollama, LM Studio).
+fn cfg_is_local(c: &Cfg, model: &String) -> Int ! alloc
+    if cfg_is_ollama(c, &model) != 0
+        return 1
+    cfg_is_lmstudio(c, &model)
+
+fn cfg_local_port(c: &Cfg, model: &String) -> Int ! alloc
+    if cfg_is_lmstudio(c, &model) != 0
+        1234
+    else
+        11434
+
+# Nombre del modelo en la petición: "model_id" si existe; si no, el nombre sin "ollama:".
+fn cfg_wire_model(c: &Cfg, model: &String) -> String ! alloc
+    id = cfg_mstr(c, &model, &"model_id", "")
+    if str_len(id) > 0
+        return id
+    if ollama_has_prefix(&model) != 0
+        return str_slice(model, 7, str_len(model))
+    if lmstudio_has_prefix(&model) != 0
+        return str_slice(model, 9, str_len(model))
+    model.dup()
+
+# Variable de entorno con el servidor local del proveedor.
+fn cfg_local_env(c: &Cfg, model: &String) -> String ! alloc
+    if cfg_is_lmstudio(c, &model) != 0
+        "LMSTUDIO_HOST"
+    else
+        "OLLAMA_HOST"
+
+# $OLLAMA_HOST / $LMSTUDIO_HOST sin esquema ni barra final: "host", "host:port" o "".
+fn local_hostport(var: &String) -> String ! io, alloc
+    h = sk_trim(&getenv(&var))
+    if str_len(h) >= 8
+        if str_eq(str_slice(h, 0, 8), "https://") != 0
+            h = str_slice(h, 8, str_len(h))
+    if str_len(h) >= 7
+        if str_eq(str_slice(h, 0, 7), "http://") != 0
+            h = str_slice(h, 7, str_len(h))
+    while str_len(h) > 0
+        if str_eq(str_slice(h, str_len(h) - 1, str_len(h)), "/") != 0
+            h = str_slice(h, 0, str_len(h) - 1)
+        else
+            return ollama_fix_any(h)
+    ""
+
+# 0.0.0.0 (válido para servir, no para conectar) se conecta como loopback.
+fn ollama_fix_any(h: String) -> String ! alloc
+    if str_len(h) >= 7
+        if str_eq(str_slice(h, 0, 7), "0.0.0.0") != 0
+            return "127.0.0.1" + str_slice(h, 7, str_len(h))
+    h
+
+fn cfg_is_claude(c: &Cfg, model: &String) -> Int ! alloc
+    if str_eq(cfg_provider(c, &model), "claude") != 0
+        1
+    else
+        0
+
+fn cfg_host(c: &Cfg, model: &String) -> String ! io, alloc
+    h = cfg_mstr(c, &model, &"host", "")
+    if str_len(h) > 0
+        return h
+    if cfg_is_local(c, &model) != 0
+        hp = local_hostport(&cfg_local_env(c, &model))
+        if str_len(hp) > 0
+            i = sk_index_of(&hp, &":")
+            if i < 0
+                return hp
+            return str_slice(hp, 0, i)
+    "127.0.0.1"
+
+fn cfg_port(c: &Cfg, model: &String) -> Int ! io, alloc
+    p = cfg_mint(c, &model, &"port", 0)
     if p > 0
         return p
+    if cfg_is_local(c, &model) != 0
+        hp = local_hostport(&cfg_local_env(c, &model))
+        i = sk_index_of(&hp, &":")
+        if i >= 0
+            q = sk_parse_int(&str_slice(hp, i + 1, str_len(hp)))
+            if q > 0
+                return q
+        return cfg_local_port(c, &model)
     if cfg_has_models(c) == 0
-        if sk_contains(cfg_raw(c), ":7442") != 0
+        if sk_contains(&cfg_raw(c), &":7442") != 0
             return 7442
     7422
 
 # Token Bearer: "token" > "token_env" > "token_file" > $SOSO_LLM_API_KEY.
-fn cfg_token(c: Int, model: String) -> String ! io, alloc
-    t = cfg_mstr(c, model, "token", "")
+fn cfg_token(c: &Cfg, model: &String) -> String ! io, alloc
+    t = cfg_mstr(c, &model, &"token", "")
     if str_len(t) > 0
         return t
-    ev = cfg_mstr(c, model, "token_env", "")
+    ev = cfg_mstr(c, &model, &"token_env", "")
     if str_len(ev) > 0
-        v = getenv(ev)
+        v = getenv(&ev)
         if str_len(v) > 0
             return v
-    tf = cfg_mstr(c, model, "token_file", "")
+    tf = cfg_mstr(c, &model, &"token_file", "")
     if str_len(tf) > 0
-        content = sk_trim(fsx_read_text(tf))
+        content = sk_trim(&fsx_read_text(&tf))
         if str_len(content) > 0
             return content
-    sk_trim(getenv("SOSO_LLM_API_KEY"))
+    if cfg_is_local(c, &model) != 0
+        return ""
+    sk_trim(&getenv(&"SOSO_LLM_API_KEY"))
 
-fn cfg_max_tokens(c: Int, model: String) -> Int ! alloc
-    cfg_mint(c, model, "max_tokens", 4096)
+fn cfg_max_tokens(c: &Cfg, model: &String) -> Int ! alloc
+    cfg_mint(c, &model, &"max_tokens", 4096)
 
 # Plazo total de una petición al modelo (ms); por defecto 2 h como OpenCode.
-fn cfg_timeout_ms(c: Int, model: String) -> Int ! alloc
-    cfg_mint(c, model, "timeout_ms", 7200000)
+fn cfg_timeout_ms(c: &Cfg, model: &String) -> Int ! alloc
+    cfg_mint(c, &model, &"timeout_ms", 7200000)
 
 # Presupuesto de caracteres del historial antes de compactar.
-fn cfg_context_chars(c: Int, model: String) -> Int ! alloc
-    cfg_mint(c, model, "context_chars", 60000)
+fn cfg_context_chars(c: &Cfg, model: &String) -> Int ! alloc
+    cfg_mint(c, &model, &"context_chars", 60000)
 
-fn cfg_vision(c: Int, model: String) -> Int ! alloc
-    n = cfg_mnode(c, model)
-    k = json_get(cfg_doc(c), n, "vision")
+fn cfg_vision(c: &Cfg, model: &String) -> Int ! alloc
+    d = cfg_doc(c)
+    n = cfg_mnode_d(&d, &model)
+    k = json_get(&d, n, &"vision")
     if k < 0
         return 0
-    json_bool(cfg_doc(c), k)
+    json_bool(&d, k)
 
-fn cfg_shell(c: Int) -> String ! io, alloc
-    s = cfg_top_str(c, "shell")
+fn cfg_shell(c: &Cfg) -> String ! io, alloc
+    s = cfg_top_str(c, &"shell")
     if str_len(s) > 0
         return s
-    if fsx_exists("/bin/sh") != 0
+    if fsx_exists(&"/bin/sh") != 0
         return "/bin/sh"
     "/bin/sosh"
 
 # 1 si el modelo responde en streaming (SSE): emite eventos text_delta mientras genera.
-fn cfg_stream(c: Int, model: String) -> Int ! alloc
-    n = cfg_mnode(c, model)
-    k = json_get(cfg_doc(c), n, "stream")
+fn cfg_stream(c: &Cfg, model: &String) -> Int ! alloc
+    d = cfg_doc(c)
+    n = cfg_mnode_d(&d, &model)
+    k = json_get(&d, n, &"stream")
     if k < 0
         return 0
-    json_bool(cfg_doc(c), k)
+    json_bool(&d, k)

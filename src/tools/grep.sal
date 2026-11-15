@@ -7,8 +7,9 @@ import "salkit/strbuf.sal"
 import "src/tools/common.sal"
 import "src/tools/edit.sal"
 import "src/util.sal"
+import "src/agent/ctx.sal"
 
-fn grep_trim_cr(text: String, a: Int, e: Int) -> String ! alloc
+fn grep_trim_cr(text: &String, a: Int, e: Int) -> String ! alloc
     te = e
     if te > a
         if str_char(text, te - 1) == 13
@@ -16,7 +17,7 @@ fn grep_trim_cr(text: String, a: Int, e: Int) -> String ! alloc
     str_slice(text, a, te)
 
 # Inicio de la línea que contiene `m`; `lo` es un inicio de línea conocido (<= m).
-fn grep_line_start(text: String, lo: Int, m: Int) -> Int
+fn grep_line_start(text: &String, lo: Int, m: Int) -> Int
     i = m
     while i > lo
         if str_char(text, i - 1) == 10
@@ -24,7 +25,7 @@ fn grep_line_start(text: String, lo: Int, m: Int) -> Int
         i = i - 1
     lo
 
-fn grep_count_nl(text: String, a: Int, b: Int) -> Int
+fn grep_count_nl(text: &String, a: Int, b: Int) -> Int
     k = 0
     i = a
     while i < b
@@ -59,8 +60,8 @@ fn grep_group_end(hits: Int, i: Int, ctx: Int) -> Int
 # Escribe en `out` las coincidencias de un fichero (`hits`: números de línea ascendentes) con `ctx`
 # líneas de contexto. Coincidencia: "ruta:N: texto"; contexto: "ruta-N- texto"; "--" separa grupos.
 # `st` es un vec [coincidencias, ficheros con coincidencias, coincidencias mostradas, grupos mostrados].
-fn grep_render(out: Int, st: Int, display: String, text: String, hits: Int, ctx: Int) -> Int ! alloc
-    starts = line_starts(text)
+fn grep_render(out: &mut List[String], st: Int, display: &String, text: &String, hits: Int, ctx: Int) -> Int ! alloc
+    starts = line_starts(&text)
     total = vec_len(starts) - 1
     nh = vec_len(hits)
     i = 0
@@ -74,60 +75,65 @@ fn grep_render(out: Int, st: Int, display: String, text: String, hits: Int, ctx:
             ge = total
         if ctx > 0
             if vec_get(st, 3) > 0
-                x = sk_sl_push(out, "--")
+                x = out.push("--")
         x = vec_set(st, 3, vec_get(st, 3) + 1)
         p = i
         ln = gs
         while ln <= ge
-            ltxt = grep_clip(grep_trim_cr(text, vec_get(starts, ln - 1), vec_get(starts, ln) - 1))
+            ltxt = grep_clip(grep_trim_cr(&text, vec_get(starts, ln - 1), vec_get(starts, ln) - 1))
             if p < j
                 if vec_get(hits, p) == ln
                     if vec_get(st, 2) < 100
-                        y = sk_sl_push(out, display + ":" + int_to_str(ln) + ": " + ltxt)
+                        y = out.push(display + ":" + int_to_str(ln) + ": " + ltxt)
                     y = vec_set(st, 2, vec_get(st, 2) + 1)
                     p = p + 1
                 else
-                    y = sk_sl_push(out, display + "-" + int_to_str(ln) + "- " + ltxt)
+                    y = out.push(display + "-" + int_to_str(ln) + "- " + ltxt)
             else
-                y = sk_sl_push(out, display + "-" + int_to_str(ln) + "- " + ltxt)
+                y = out.push(display + "-" + int_to_str(ln) + "- " + ltxt)
             ln = ln + 1
         i = j
     0
 
 # Busca en un fichero y añade las coincidencias a `out` (ver grep_render).
 # Un literal salta de coincidencia en coincidencia; una regex se prueba línea a línea.
-fn grep_file(out: Int, st: Int, re: Int, lit: String, use_lit: Int, display: String, text: String, ctx: Int) -> Int ! alloc
+fn grep_file(out: &mut List[String], st: Int, pat: &String, icase: Int, use_lit: Int, display: &String, text: &String, ctx: Int) -> Int ! io, alloc
     n = str_len(text)
     pos = 0
     line = 1
     hits = vec_new()
+    # Autómata de reconocimiento (solo para comprobar bytes iniciales posibles): reutilizarlo
+    # entre búsquedas deja su estado corrupto, así que cada línea candidata usa uno nuevo.
+    re = regex_compile(&pat, icase)
     while pos < n
         if use_lit != 0
-            m = sk_index_from(text, lit, pos)
+            m = sk_index_from(&text, &pat, pos)
             if m < 0
                 pos = n
             else
-                ls = grep_line_start(text, pos, m)
-                line = line + grep_count_nl(text, pos, ls)
-                e = sk_index_from(text, "\n", m)
+                ls = grep_line_start(&text, pos, m)
+                line = line + grep_count_nl(&text, pos, ls)
+                e = sk_index_from(&text, &"\n", m)
                 if e < 0
                     e = n
                 x = grep_note(st, hits, line)
                 line = line + 1
                 pos = e + 1
         else
-            e = sk_index_from(text, "\n", pos)
+            e = sk_index_from(&text, &"\n", pos)
             if e < 0
                 e = n
-            if regex_prefilter(re, text, pos, e) != 0
-                if regex_test(re, grep_trim_cr(text, pos, e)) != 0
+            if regex_prefilter(&re, &text, pos, e) != 0
+                ln = grep_trim_cr(&text, pos, e)
+                mre = regex_compile(&pat, icase)
+                if regex_test(&mut mre, &ln) != 0
                     x = grep_note(st, hits, line)
             line = line + 1
             pos = e + 1
     if vec_len(hits) > 0
         x = vec_set(st, 1, vec_get(st, 1) + 1)
         if vec_get(st, 2) < 100
-            x = grep_render(out, st, display, text, hits, ctx)
+            x = grep_render(out, st, &display, &text, hits, ctx)
     0
 
 # Cuenta una coincidencia y guarda su línea (hasta 100 por fichero).
@@ -137,28 +143,28 @@ fn grep_note(st: Int, hits: Int, line: Int) -> Int
         return vec_push(hits, line)
     0
 
-fn tool_grep(c: Int, d: Int, a: Int) -> Int ! io, alloc
-    pattern = arg_str(d, a, "pattern,regex,query", "")
+fn tool_grep(c: &Ctx, d: &JsonDoc, a: Int) -> ToolResult ! io, alloc
+    pattern = arg_str(d, a, &"pattern,regex,query", "")
     if str_len(pattern) == 0
-        return tr_err("pattern must not be empty")
-    raw = arg_str(d, a, "path,dir,directory", ".")
-    include = arg_str(d, a, "include,glob,filePattern", "")
-    icase = arg_bool(d, a, "ignoreCase,ignore_case,caseInsensitive", 0)
-    ctx = arg_int(d, a, "context,contextLines,C", 0)
+        return tr_err(&"pattern must not be empty")
+    raw = arg_str(d, a, &"path,dir,directory", ".")
+    include = arg_str(d, a, &"include,glob,filePattern", "")
+    icase = arg_bool(d, a, &"ignoreCase,ignore_case,caseInsensitive", 0)
+    ctx = arg_int(d, a, &"context,contextLines,C", 0)
     if ctx < 0
         ctx = 0
     if ctx > 10
         ctx = 10
-    root = path_abs(raw)
-    if fsx_exists(root) == 0
-        return tr_err("Path not found: " + root)
-    re = regex_compile(pattern, icase)
-    if regex_ok(re) == 0
-        return tr_err("Invalid regular expression: " + regex_error(re))
+    root = path_abs(&raw)
+    if fsx_exists(&root) == 0
+        return tr_err(&("Path not found: " + root))
+    re = regex_compile(&pattern, icase)
+    if regex_ok(&re) == 0
+        return tr_err(&("Invalid regular expression: " + regex_error(&re)))
     use_lit = 0
     if icase == 0
-        if regex_is_literal(pattern) != 0
-            if sk_index_of(pattern, char_to_str(10)) < 0
+        if regex_is_literal(&pattern) != 0
+            if sk_index_of(&pattern, &char_to_str(10)) < 0
                 use_lit = 1
     out = sk_sl_new()
     st = vec_new()
@@ -167,34 +173,34 @@ fn tool_grep(c: Int, d: Int, a: Int) -> Int ! io, alloc
     x = vec_push(st, 0)
     x = vec_push(st, 0)
     cwd = cwd_path()
-    if fsx_is_dir(root) == 0
-        text = fsx_read_text_max(root, 2097152)
-        if looks_binary(text) == 0
-            x = grep_file(out, st, re, pattern, use_lit, path_rel(cwd, root), text, ctx)
+    if fsx_is_dir(&root) == 0
+        text = fsx_read_text_max(&root, 2097152)
+        if looks_binary(&text) == 0
+            x = grep_file(&mut out, st, &pattern, icase, use_lit, &path_rel(&cwd, &root), &text, ctx)
     else
-        files = fsx_walk(root, default_ignores(), 50000)
-        n = sk_sl_len(files)
+        files = fsx_walk(&root, &default_ignores(), 50000)
+        n = sk_sl_len(&files)
         i = 0
         while i < n
-            rel = sk_sl_get(files, i)
+            rel = sk_sl_get(&files, i)
             take = 1
             if str_len(include) > 0
-                take = glob_match_name(include, rel)
+                take = glob_match_name(&include, rel)
             if take != 0
                 full = root + "/" + rel
-                if fsx_size(full) <= 2097152
-                    text = fsx_read_text_max(full, 2097152)
-                    if looks_binary(text) == 0
-                        x = grep_file(out, st, re, pattern, use_lit, path_rel(cwd, full), text, ctx)
+                if fsx_size(&full) <= 2097152
+                    text = fsx_read_text_max(&full, 2097152)
+                    if looks_binary(&text) == 0
+                        x = grep_file(&mut out, st, &pattern, icase, use_lit, &path_rel(&cwd, &full), &text, ctx)
             i = i + 1
     total = vec_get(st, 0)
     if total == 0
-        return tr_ok("No matches found", pattern)
+        return tr_ok(&"No matches found", &pattern)
     head = "Found " + int_to_str(total) + " match" + plural_es(total) + " in " + int_to_str(vec_get(st, 1)) + " file" + plural_s(vec_get(st, 1)) + char_to_str(10)
-    body = head + sk_join(out, char_to_str(10))
+    body = head + sk_join(&out, &char_to_str(10))
     if total > 100
         body = body + char_to_str(10) + "(Results truncated: showing 100 of " + int_to_str(total) + " matches. Narrow the search with path or include.)"
-    tr_ok(body, pattern)
+    tr_ok(&body, &pattern)
 
 fn plural_es(n: Int) -> String
     if n == 1

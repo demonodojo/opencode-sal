@@ -3,10 +3,10 @@ import "io/io.sal"
 
 fn main() -> Int ! io, alloc
     if argc() < 3
-        write_str_fd(2, "uso: soso-improve-sal campana DIR\n")
+        Fd.new(2).write_str(&"uso: soso-improve-sal campana DIR\n")
         2
     else
         if str_eq(argv(1), "campana") != 0
-            campana_diez(argv(2))
+            campana_diez(&argv(2))
         else
             2

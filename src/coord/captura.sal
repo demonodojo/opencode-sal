@@ -1,4 +1,4 @@
 import "io/fs.sal"
 
-fn captura_base(out_dir: String) -> Int ! io, alloc
-    write_file_path(out_dir + "/base.txt", "capturado\n")
+fn captura_base(out_dir: &String) -> Int ! io, alloc
+    Path.new(out_dir + "/base.txt").write(&"capturado\n")

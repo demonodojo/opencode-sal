@@ -13,32 +13,35 @@ import "salkit/strbuf.sal"
 import "salkit/proc.sal"
 
 # Lanza `bin` con la lista de argumentos `args` (sin argv[0]). Devuelve el asa, o -1 si falla.
-fn child_start(bin: String, args: Int) -> Int ! io, alloc
+fn child_start(bin: &String, args: &List[String]) -> Int ! io, alloc
     argv_l = sk_sl_new()
-    x = sk_sl_push(argv_l, bin)
+    sk_sl_push(&mut argv_l, bin.dup())
     i = 0
     while i < sk_sl_len(args)
-        y = sk_sl_push(argv_l, sk_sl_get(args, i))
+        sk_sl_push(&mut argv_l, sk_sl_get(args, i).dup())
         i = i + 1
-    out_pipe = pipe_create()
-    in_pipe = pipe_create()
-    if out_pipe < 0
+    out_packed = pipe_create_go()
+    in_packed = pipe_create_go()
+    if out_packed < 0
         return 0 - 1
-    if in_pipe < 0
+    if in_packed < 0
         return 0 - 1
-    out_rd = pipe_read_fd(out_pipe)
-    out_wr = pipe_write_fd(out_pipe)
-    in_rd = pipe_read_fd(in_pipe)
-    in_wr = pipe_write_fd(in_pipe)
-    pid = spawn_io_argv(bin, vec_len(argv_l), proc_argv_tab(argv_l), in_rd, out_wr, 2, d"", 0 - 1)
-    x2 = close_fd(out_wr)
-    x3 = close_fd(in_rd)
+    out_pipe = Pipe.from_packed(out_packed)
+    in_pipe = Pipe.from_packed(in_packed)
+    out_rd = out_pipe.read_fd()
+    out_wr = out_pipe.write_fd()
+    in_rd = in_pipe.read_fd()
+    in_wr = in_pipe.write_fd()
+    av = proc_argv_tab(&argv_l)
+    pid = spawn_io_argv(bin, argv_l.len(), &av.tab, in_rd, out_wr, 2, &d"", 0 - 1)
+    Fd.new(out_wr).close()
+    Fd.new(in_rd).close()
     if pid < 0
-        x4 = close_fd(out_rd)
-        x5 = close_fd(in_wr)
+        Fd.new(out_rd).close()
+        Fd.new(in_wr).close()
         return 0 - 1
     st = vec_new()
-    x6 = vec_push(st, str_as_int(""))
+    vec_push(st, "".to_int())
     h = vec_new()
     x7 = vec_push(h, pid)
     x7 = vec_push(h, out_rd)
@@ -50,42 +53,42 @@ fn child_start(bin: String, args: Int) -> Int ! io, alloc
 fn child_read_line(h: Int, idle_ms: Int) -> String ! io, alloc
     fd = vec_get(h, 1)
     st = vec_get(h, 3)
-    chunk = bytes_new(65536)
+    chunk = Bytes.new(65536)
     waited = 0
     result = ""
     done = 0
     while done == 0
         buf = str_from_int(vec_get(st, 0))
-        nlp = sk_index_of(buf, char_to_str(10))
+        nlp = sk_index_of(&buf, &String.from_char(10))
         if nlp >= 0
-            result = str_slice(buf, 0, nlp)
-            x = vec_set(st, 0, str_as_int(str_slice(buf, nlp + 1, str_len(buf))))
+            result = buf.slice(0, nlp)
+            x = vec_set(st, 0, buf.slice(nlp + 1, buf.len()).to_int())
             done = 1
         else
-            k = read_timeout_fd(fd, bytes_ptr(chunk), 65536, 1000)
+            k = Fd.new(fd).read_timeout(chunk.ptr(), 65536, 1000)
             if k > 0
-                x = vec_set(st, 0, str_as_int(buf + bytes_to_str(bytes_view(chunk, 0, k))))
+                x = vec_set(st, 0, (buf + bytes_view(chunk, 0, k).to_str()).to_int())
                 waited = 0
             elsif k == 0
-                if str_len(buf) > 0
+                if buf.len() > 0
                     result = buf
-                    x = vec_set(st, 0, str_as_int(""))
+                    x = vec_set(st, 0, "".to_int())
                 else
-                    result = char_to_str(4)
+                    result = String.from_char(4)
                 done = 1
             else
                 waited = waited + 1000
                 if waited >= idle_ms
-                    result = char_to_str(4)
+                    result = String.from_char(4)
                     done = 1
     result
 
-fn child_write_line(h: Int, line: String) -> Int ! io, alloc
-    write_str_fd(vec_get(h, 2), line + char_to_str(10))
+fn child_write_line(h: Int, line: &String) -> Int ! io, alloc
+    Fd.new(vec_get(h, 2)).write_str(&(line + String.from_char(10)))
 
 # Cierra los pipes y espera al hijo. Devuelve su código de salida.
 fn child_finish(h: Int) -> Int ! io, alloc
-    x = close_fd(vec_get(h, 2))
+    Fd.new(vec_get(h, 2)).close()
     status = wait_pid(vec_get(h, 0))
-    y = close_fd(vec_get(h, 1))
-    wait_exit_code(status)
+    Fd.new(vec_get(h, 1)).close()
+    Wait.from_raw(status).exit_code()

@@ -20,213 +20,222 @@ fn claude_beat_ms() -> Int
 fn claude_deadline_ms() -> Int
     1800000
 
-# Estado de una ejecución: vec [texto emitido (0/1), tokens de entrada, tokens de salida,
-# error (0/1), texto del resultado, lista de ids, lista de nombres, lista de entradas JSON].
-fn cs_new() -> Int ! alloc
-    st = vec_new()
-    x = vec_push(st, 0)
-    x = vec_push(st, 0)
-    x = vec_push(st, 0)
-    x = vec_push(st, 0)
-    x = vec_push(st, str_as_int(strdup("")))
-    x = vec_push(st, sk_sl_new())
-    x = vec_push(st, sk_sl_new())
-    x = vec_push(st, sk_sl_new())
-    st
+# Estado de una ejecución del stream de Claude Code.
+struct CsState
+    launched: Int
+    text: Int
+    in_tokens: Int
+    out_tokens: Int
+    failed: Int
+    result: String
+    ids: List[String]
+    names: List[String]
+    inputs: List[String]
 
-fn cs_result(st: Int) -> String
-    str_from_int(vec_get(st, 4))
+fn cs_new() -> CsState ! alloc
+    CsState(1, 0, 0, 0, 0, "", List.new[String](), List.new[String](), List.new[String]())
 
-fn cs_in(st: Int) -> Int
-    vec_get(st, 1)
+fn cs_launched(st: &CsState) -> Int
+    st.launched
 
-fn cs_out(st: Int) -> Int
-    vec_get(st, 2)
+fn cs_text(st: &CsState) -> Int
+    st.text
 
-fn cs_failed(st: Int) -> Int
-    vec_get(st, 3)
+fn cs_result(st: &CsState) -> String ! alloc
+    st.result.dup()
 
-fn cs_flag(d: Int, n: Int, key: String) -> Int
-    k = json_get(d, n, key)
+fn cs_in(st: &CsState) -> Int
+    st.in_tokens
+
+fn cs_out(st: &CsState) -> Int
+    st.out_tokens
+
+fn cs_failed(st: &CsState) -> Int
+    st.failed
+
+fn cs_flag(d: &JsonDoc, n: Int, key: &String) -> Int
+    k = json_get(&d, n, &key)
     if k < 0
         return 0
-    json_bool(d, k)
+    json_bool(&d, k)
 
 # Título corto de una herramienta de Claude Code a partir de su entrada.
-fn cs_title(name: String, d: Int, inp: Int) -> String ! alloc
-    t = json_get_str(d, inp, "description")
-    if str_len(t) == 0
-        t = json_get_str(d, inp, "command")
-    if str_len(t) == 0
-        t = json_get_str(d, inp, "file_path")
-    if str_len(t) == 0
-        t = json_get_str(d, inp, "pattern")
-    if str_len(t) == 0
-        t = json_get_str(d, inp, "path")
-    if str_len(t) == 0
+fn cs_title(name: &String, d: &JsonDoc, inp: Int) -> String ! alloc
+    t = json_get_str(&d, inp, &"description")
+    if t.len() == 0
+        t = json_get_str(&d, inp, &"command")
+    if t.len() == 0
+        t = json_get_str(&d, inp, &"file_path")
+    if t.len() == 0
+        t = json_get_str(&d, inp, &"pattern")
+    if t.len() == 0
+        t = json_get_str(&d, inp, &"path")
+    if t.len() == 0
         t = name
-    sk_truncate_middle(t, 80)
+    sk_truncate_middle(&t, 80)
 
 # Texto de un tool_result (cadena, o lista de bloques {type:text,text}).
-fn cs_result_text(d: Int, content: Int) -> String ! alloc
+fn cs_result_text(d: &JsonDoc, content: Int) -> String ! alloc
     if content < 0
         return ""
-    if json_is_string(d, content) != 0
-        return json_str(d, content)
+    if json_is_string(&d, content) != 0
+        return json_str(&d, content).dup()
     out = ""
-    n = json_first(d, content)
+    n = json_first(&d, content)
     while n >= 0
-        out = out + json_get_str(d, n, "text")
-        n = json_next(d, n)
+        out = out + json_get_str(&d, n, &"text")
+        n = json_next(&d, n)
     out
 
-fn cs_assistant(c: Int, d: Int, msg: Int, st: Int) -> Int ! io, alloc
-    items = json_get(d, msg, "content")
+fn cs_assistant(c: &Ctx, d: &JsonDoc, msg: Int, st: &mut CsState) -> Int ! io, alloc
+    items = json_get(&d, msg, &"content")
     if items < 0
         return 0
-    n = json_first(d, items)
+    n = json_first(&d, items)
     while n >= 0
-        kind = json_get_str(d, n, "type")
-        if str_eq(kind, "text") != 0
-            t = json_get_str(d, n, "text")
-            if str_len(sk_trim(t)) > 0
-                x = ev_text(c, t)
-                x = vec_set(st, 0, 1)
-        elsif str_eq(kind, "tool_use") != 0
-            id = json_get_str(d, n, "id")
-            name = json_get_str(d, n, "name")
-            inp = json_get(d, n, "input")
-            input_json = "{{}}"
-            title = name
+        kind = json_get_str(&d, n, &"type")
+        if kind.eq("text") != 0
+            t = json_get_str(&d, n, &"text")
+            if sk_trim(&t).len() > 0
+                x = ev_text(c, &t)
+                st.text = 1
+        elsif kind.eq("tool_use") != 0
+            id = json_get_str(&d, n, &"id")
+            name = json_get_str(&d, n, &"name")
+            inp = json_get(&d, n, &"input")
+            input_json = "{}"
+            title = name.slice(0, name.len())
             if inp >= 0
-                input_json = json_dump(d, inp)
-                title = cs_title(name, d, inp)
-            x = sk_sl_push(vec_get(st, 5), id)
-            x = sk_sl_push(vec_get(st, 6), name)
-            x = sk_sl_push(vec_get(st, 7), input_json)
-            x = ev_tool(c, id, name, "running", input_json, "", title)
-        n = json_next(d, n)
+                input_json = json_dump(&d, inp)
+                title = cs_title(&name.slice(0, name.len()), &d, inp)
+            st.ids.push(id.dup())
+            st.names.push(name.dup())
+            st.inputs.push(input_json.dup())
+            x = ev_tool(c, &id, &name, &"running", &input_json, &"", &title)
+        n = json_next(&d, n)
     0
 
-fn cs_user(c: Int, d: Int, msg: Int, st: Int) -> Int ! io, alloc
-    items = json_get(d, msg, "content")
+fn cs_user(c: &Ctx, d: &JsonDoc, msg: Int, st: &CsState) -> Int ! io, alloc
+    items = json_get(&d, msg, &"content")
     if items < 0
         return 0
-    if json_is_array(d, items) == 0
+    if json_is_array(&d, items) == 0
         return 0
-    n = json_first(d, items)
+    n = json_first(&d, items)
     while n >= 0
-        if str_eq(json_get_str(d, n, "type"), "tool_result") != 0
-            id = json_get_str(d, n, "tool_use_id")
-            ids = vec_get(st, 5)
+        if json_get_str(&d, n, &"type").eq("tool_result") != 0
+            id = json_get_str(&d, n, &"tool_use_id")
             k = 0
             name = "tool"
-            input_json = "{{}}"
-            while k < sk_sl_len(ids)
-                if str_eq(sk_sl_get(ids, k), id) != 0
-                    name = sk_sl_get(vec_get(st, 6), k)
-                    input_json = sk_sl_get(vec_get(st, 7), k)
+            input_json = "{}"
+            while k < st.ids.len()
+                if sk_sl_get(&st.ids, k).eq(id) != 0
+                    name = sk_sl_get(&st.names, k).dup()
+                    input_json = sk_sl_get(&st.inputs, k).dup()
                 k = k + 1
-            out = sk_truncate_middle(cs_result_text(d, json_get(d, n, "content")), 4000)
+            out = sk_truncate_middle(&cs_result_text(&d, json_get(&d, n, &"content")), 4000)
             status = "completed"
-            if cs_flag(d, n, "is_error") != 0
+            if cs_flag(&d, n, &"is_error") != 0
                 status = "error"
-            x = ev_tool(c, id, name, status, input_json, out, name)
-        n = json_next(d, n)
+            shown = name.slice(0, name.len())
+            x = ev_tool(c, &id, &name, &status, &input_json, &out, &shown)
+        n = json_next(&d, n)
     0
 
 # Procesa una línea de la salida; las que no son JSON (stderr) se ignoran.
-fn cs_line(c: Int, line: String, st: Int) -> Int ! io, alloc
-    t = sk_trim(line)
-    if str_len(t) == 0
+fn cs_line(c: &Ctx, line: &String, st: &mut CsState) -> Int ! io, alloc
+    t = sk_trim(&line)
+    if t.len() == 0
         return 0
-    if str_char(t, 0) != 123
+    if t.char(0) != 123
         return 0
-    d = json_parse(t)
-    if json_ok(d) == 0
+    d = json_parse(&t)
+    if json_ok(&d) == 0
         return 0
-    r = json_root(d)
-    kind = json_get_str(d, r, "type")
-    if str_eq(kind, "system") != 0
-        x = cs_system(c, d, r)
-    elsif str_eq(kind, "assistant") != 0
-        x = cs_assistant(c, d, json_get(d, r, "message"), st)
-    elsif str_eq(kind, "user") != 0
-        x = cs_user(c, d, json_get(d, r, "message"), st)
-    elsif str_eq(kind, "rate_limit_event") != 0
-        x = cs_rate(c, d, r)
-    elsif str_eq(kind, "result") != 0
-        x = cs_final(d, r, st)
+    r = json_root(&d)
+    kind = json_get_str(&d, r, &"type")
+    match kind
+        "system" => cs_system(c, &d, r)
+        "assistant" => cs_assistant(c, &d, json_get(&d, r, &"message"), st)
+        "user" => cs_user(c, &d, json_get(&d, r, &"message"), st)
+        "rate_limit_event" => cs_rate(c, &d, r)
+        "result" => cs_final(&d, r, st)
+        _ => 0
     0
 
-fn cs_system(c: Int, d: Int, r: Int) -> Int ! io, alloc
-    if str_eq(json_get_str(d, r, "subtype"), "init") != 0
-        return ev_status(c, "claude en marcha · modelo " + json_get_str(d, r, "model") + " · sesión " + json_get_str(d, r, "session_id"))
+fn cs_system(c: &Ctx, d: &JsonDoc, r: Int) -> Int ! io, alloc
+    if json_get_str(&d, r, &"subtype").eq("init") != 0
+        return ev_status(c, &("claude en marcha · modelo " + json_get_str(&d, r, &"model") + " · sesión " + json_get_str(&d, r, &"session_id")))
     0
 
-fn cs_rate(c: Int, d: Int, r: Int) -> Int ! io, alloc
-    rs = json_get_str(d, json_get(d, r, "rate_limit_info"), "status")
-    if str_len(rs) > 0
-        if str_eq(rs, "allowed") == 0
-            return ev_status(c, "claude: límite de uso (" + rs + ")")
+fn cs_rate(c: &Ctx, d: &JsonDoc, r: Int) -> Int ! io, alloc
+    rs = json_get_str(&d, json_get(&d, r, &"rate_limit_info"), &"status")
+    if rs.len() > 0
+        if rs.eq("allowed") == 0
+            return ev_status(c, &("claude: límite de uso (" + rs + ")"))
     0
 
-fn cs_final(d: Int, r: Int, st: Int) -> Int ! alloc
-    u = json_get(d, r, "usage")
+fn cs_final(d: &JsonDoc, r: Int, st: &mut CsState) -> Int ! alloc
+    u = json_get(&d, r, &"usage")
     if u >= 0
-        x = vec_set(st, 1, json_get_int(d, u, "input_tokens") + json_get_int(d, u, "cache_creation_input_tokens") + json_get_int(d, u, "cache_read_input_tokens"))
-        y = vec_set(st, 2, json_get_int(d, u, "output_tokens"))
-    if cs_flag(d, r, "is_error") != 0
-        z = vec_set(st, 3, 1)
-    vec_set(st, 4, str_as_int(json_get_str(d, r, "result")))
+        st.in_tokens = json_get_int(&d, u, &"input_tokens") + json_get_int(&d, u, &"cache_creation_input_tokens") + json_get_int(&d, u, &"cache_read_input_tokens")
+        st.out_tokens = json_get_int(&d, u, &"output_tokens")
+    if cs_flag(&d, r, &"is_error") != 0
+        st.failed = 1
+    st.result = json_get_str(&d, r, &"result").dup()
+    0
 
-fn cs_argv(m: String, prompt: String) -> Int ! alloc
+fn cs_argv(m: &String, prompt: &String) -> List[String] ! alloc
     a = sk_sl_new()
-    x = sk_sl_push(a, "claude")
-    x = sk_sl_push(a, "-p")
-    x = sk_sl_push(a, "--output-format")
-    x = sk_sl_push(a, "stream-json")
-    x = sk_sl_push(a, "--verbose")
-    if str_len(m) > 0
-        x = sk_sl_push(a, "--model")
-        x = sk_sl_push(a, m)
-    x = sk_sl_push(a, "--")
-    x = sk_sl_push(a, prompt)
+    x = sk_sl_push(&mut a, "claude")
+    x = sk_sl_push(&mut a, "-p")
+    x = sk_sl_push(&mut a, "--output-format")
+    x = sk_sl_push(&mut a, "stream-json")
+    x = sk_sl_push(&mut a, "--verbose")
+    if m.len() > 0
+        x = sk_sl_push(&mut a, "--model")
+        x = sk_sl_push(&mut a, m.dup())
+    x = sk_sl_push(&mut a, "--")
+    x = sk_sl_push(&mut a, prompt.dup())
     a
 
-fn cs_tab(argv: Int) -> Bytes ! alloc
+fn cs_tab(argv: &List[String]) -> Bytes ! alloc
     n = sk_sl_len(argv)
-    tab = bytes_new(n * 16 + 16)
+    tab = Bytes.new(n * 16 + 16)
     i = 0
     while i < n
         s = sk_sl_get(argv, i)
-        x = spawn_argv_slot_ptr(tab, i, spawn_string_buf(s), str_len(s))
+        spawn_argv_slot_ptr(&tab, i, &spawn_string_buf(s), s.len())
         i = i + 1
     tab
 
 fn cs_secs(ms: Int) -> String ! alloc
-    int_to_str(ms / 1000) + " s"
+    (ms / 1000).to_str() + " s"
 
 # Ejecuta claude y emite los eventos. Devuelve el estado (ver cs_new) o 0 - 1 si no pudo lanzarse.
-fn claude_stream(c: Int, model: String, prompt: String) -> Int ! io, alloc
-    m = claude_model_arg(model)
-    label = m
-    if str_len(label) == 0
+fn claude_stream(c: &Ctx, model: &String, prompt: &String) -> CsState ! io, alloc
+    m = claude_model_arg(&model)
+    label = m.slice(0, m.len())
+    if label.len() == 0
         label = "por defecto"
-    x = ev_status(c, "lanzando claude -p (modelo " + label + ")...")
-    pp = pipe_create()
-    if pp < 0
-        return 0 - 1
-    rd = pipe_read_fd(pp)
-    wr = pipe_write_fd(pp)
-    argv = cs_argv(m, prompt)
-    pid = spawn_io_argv("claude", sk_sl_len(argv), cs_tab(argv), spawn_fd_closed(), wr, wr, "", 0 - 1)
-    y = close_fd(wr)
+    x = ev_status(c, &("lanzando claude -p (modelo " + label + ")..."))
+    bad = cs_new()
+    packed = pipe_create_go()
+    if packed < 0
+        bad.launched = 0
+        return bad
+    pp = Pipe.from_packed(packed)
+    rd = pp.read_fd()
+    wr = pp.write_fd()
+    argv = cs_argv(&m, prompt)
+    pid = spawn_io_argv(&"claude", sk_sl_len(&argv), &cs_tab(&argv), SPAWN_FD_CLOSED, wr, wr, &"", 0 - 1)
+    Fd.new(wr).close()
     if pid < 0
-        z = close_fd(rd)
-        return 0 - 1
+        Fd.new(rd).close()
+        bad.launched = 0
+        return bad
     st = cs_new()
-    chunk = bytes_new(65536)
+    chunk = Bytes.new(65536)
     buf = ""
     start = uptime_ms()
     last_out = start
@@ -236,47 +245,46 @@ fn claude_stream(c: Int, model: String, prompt: String) -> Int ! io, alloc
     while go != 0
         now = uptime_ms()
         if now - start > claude_deadline_ms()
-            k0 = kill_pid(pid, 9)
-            x = ev_error(c, "claude no terminó en " + cs_secs(claude_deadline_ms()) + "; se canceló")
-            x = vec_set(st, 3, 1)
+            kill_pid(pid, 9)
+            x = ev_error(c, &("claude no terminó en " + cs_secs(claude_deadline_ms()) + "; se canceló"))
+            st.failed = 1
             go = 0
         else
-            k = read_timeout_fd(rd, bytes_ptr(chunk), 65536, 1000)
+            k = Fd.new(rd).read_timeout(chunk.ptr(), 65536, 1000)
             if k > 0
                 last_out = uptime_ms()
                 last_beat = last_out
-                piece = bytes_to_str(bytes_view(chunk, 0, k))
+                piece = bytes_view(chunk, 0, k).to_str()
                 buf = buf + piece
                 pos = 0
-                nl = sk_index_from(buf, "\n", pos)
+                nl = sk_index_from(&buf, &"\n", pos)
                 while nl >= 0
-                    line = str_slice(buf, pos, nl)
-                    if sk_starts_with(sk_trim(line), "{{") == 0
-                        tail = sk_truncate_middle(tail + line + "\n", 1500)
-                    w = cs_line(c, line, st)
+                    line = buf.slice(pos, nl)
+                    if sk_starts_with(&sk_trim(&line), &"{") == 0
+                        tail = sk_truncate_middle(&(tail + line + "\n"), 1500)
+                    cs_line(c, &line, &mut st)
                     pos = nl + 1
-                    nl = sk_index_from(buf, "\n", pos)
+                    nl = sk_index_from(&buf, &"\n", pos)
                 if pos > 0
-                    buf = str_slice(buf, pos, str_len(buf))
+                    buf = buf.slice(pos, buf.len())
             elsif k == 0
                 go = 0
             elsif k != 0 - 11
                 go = 0
-            else
-                if uptime_ms() - last_beat >= claude_beat_ms()
-                    last_beat = uptime_ms()
-                    w2 = ev_status(c, "claude sigue en marcha (" + cs_secs(uptime_ms() - start) + ", sin salida desde hace " + cs_secs(uptime_ms() - last_out) + ")")
+            elsif uptime_ms() - last_beat >= claude_beat_ms()
+                last_beat = uptime_ms()
+                w2 = ev_status(c, &("claude sigue en marcha (" + cs_secs(uptime_ms() - start) + ", sin salida desde hace " + cs_secs(uptime_ms() - last_out) + ")"))
     wst = wait_pid(pid)
-    z2 = close_fd(rd)
-    code = wait_exit_code(wst)
+    Fd.new(rd).close()
+    code = Wait.from_raw(wst).exit_code()
     if code != 0
-        if vec_get(st, 3) == 0
-            x = vec_set(st, 3, 1)
-            msg = "claude terminó con código " + int_to_str(code)
+        if st.failed == 0
+            st.failed = 1
+            msg = "claude terminó con código " + code.to_str()
             if code == 127
                 msg = "no se pudo lanzar claude: ¿está instalado y en el PATH?"
-            if str_len(sk_trim(tail)) > 0
-                msg = msg + ": " + sk_trim(tail)
-            x = ev_error(c, msg)
-    x = ev_status(c, "claude terminó (" + cs_secs(uptime_ms() - start) + ")")
+            if sk_trim(&tail).len() > 0
+                msg = msg + ": " + sk_trim(&tail)
+            x = ev_error(c, &msg)
+    x = ev_status(c, &("claude terminó (" + cs_secs(uptime_ms() - start) + ")"))
     st

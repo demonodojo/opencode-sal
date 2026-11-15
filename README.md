@@ -47,6 +47,7 @@ soso-pkg instalar supercoder-sal
 | `--agent NOMBRE` | Agente (`build`, `plan`, `general`, `explore` o uno propio) |
 | `--interactive` | Pregunta los permisos `ask` al cliente (evento `permission_request`, respuesta por stdin) |
 | `--yes` | Aprueba sin preguntar los permisos `ask` |
+| `--osc7501` | Con `--format json`, emite los informes OSC 7501 por stderr (lo usa la TUI) |
 | `--file RUTA` | Adjunta un fichero o una imagen (repetible); también `@ruta` en el prompt |
 | `--` | Lo que sigue es el prompt |
 
@@ -85,6 +86,12 @@ Un modelo con `"vision": true` recibe las imágenes como partes `image_url`. Los
 
 Antes de cada petición se compacta el historial si pasa de 56 mensajes o de `"context_chars"` (recorta salidas antiguas y, si no basta, las resume con el modelo). `"stream": true` en un modelo usa SSE y emite eventos `text_delta`.
 
+### Estado en el terminal (OSC 7501)
+
+El protocolo [OSC 7501](https://gist.github.com/mitchellh/7acae3abd8355c1c00287d67e96c913a) (Program Status Protocol) permite que el terminal sepa qué hace el agente y avise cuando necesita algo. `supercoder run` escribe un informe por stderr antes de cada paso (`state=working:app=supercoder:msg=<base64>`), al pedir un permiso (`state=blocked:kind=permission`) y al terminar (`done` o `error`), de modo que la pestaña o el panel del terminal muestra el estado aunque esté en segundo plano.
+
+Se activa cuando `$TERM` está definido y no es `dumb`; se desactiva con `SUPERCODER_OSC7501=0`. Con `--format json` no se emite salvo que se pase `--osc7501` (la TUI lo hace para el proceso hijo de cada turno), y los subagentes nunca informan. No se envía la consulta `OSC 7501;?` porque su respuesta llegaría por stdin junto con la del usuario.
+
 ### Eventos `--format json`
 
 Una línea por evento, con `timestamp` y `sessionID`. Compatibles con el ejecutor Rust (`runner.rs`): `step_start`, `tool_use` (`state.status` running/completed/error con `input`, `output`, `title`), `text`, `step_finish` (`tokens`), `error` (`error.data.message`). Ampliados (el ejecutor los ignora): `text_delta`, `permission_request`, `todo`, `subagent`.
@@ -120,6 +127,30 @@ supercoder run --format json "lee /tmp/oc-fixture.txt"
 
 Un modelo sin entrada en `"models"` usa 127.0.0.1:7422. El token Bearer sale de `token`, `token_env`, `token_file` o `$SOSO_LLM_API_KEY`. Sin bloque `"models"` se mantiene el comportamiento anterior (`:7442` en el fichero selecciona 7442).
 
+### Ollama, LM Studio y soso-llm
+
+Los tres hablan `POST /v1/chat/completions` con herramientas, así que no hace falta nada más que apuntar al servidor:
+
+- **soso-llm**: el modelo por defecto (`soso-coder`, 127.0.0.1:7422, token Bearer de `token`/`token_env`/`token_file`/`$SOSO_LLM_API_KEY`).
+- **Ollama**: `supercoder run --model ollama:qwen2.5-coder:7b "prompt"`. Sin configuración usa `$OLLAMA_HOST` (`host`, `host:port` o `http://host:port`; `0.0.0.0` se conecta como loopback) o `127.0.0.1:11434`, sin `Authorization` (el token de soso-llm nunca se envía a Ollama). Si no responde, el error recuerda `ollama serve` y `ollama pull`. El modelo debe soportar herramientas (Qwen2.5-Coder, Llama 3.1+, Mistral…).
+
+- **LM Studio**: `supercoder run --model lmstudio:qwen/qwen3-coder "prompt"` (el id del modelo cargado, como lo muestra `lms ls`). Con el servidor local activo (`lms server start`) usa `$LMSTUDIO_HOST` o `127.0.0.1:1234`, sin token; si el servidor exige clave, `"token"`/`"token_env"` en el modelo. En `supercoder.json`: `"provider": "lmstudio"`.
+
+Para fijar el modelo por defecto o las opciones, en `supercoder.json`:
+
+```json
+{
+  "model": "qwen",
+  "models": {
+    "qwen":  { "provider": "ollama", "model_id": "qwen2.5-coder:7b", "context_chars": 60000 },
+    "vl":    { "provider": "ollama", "model_id": "qwen2.5vl:7b", "vision": true },
+    "otro":  { "provider": "ollama", "host": "192.168.1.20", "port": 11434, "model_id": "llama3.1:8b" }
+  }
+}
+```
+
+`"model_id"` es el nombre que se envía al servidor (también sirve para soso-llm); `host`/`port` mandan sobre `$OLLAMA_HOST`.
+
 ### Modelos de Anthropic (`claude -p`)
 
 Un modelo puede ejecutarse con la CLI `claude` (Claude Code) en modo no interactivo, sin `soso-llm`:
@@ -127,7 +158,7 @@ Un modelo puede ejecutarse con la CLI `claude` (Claude Code) en modo no interact
 - `supercoder run --model claude:sonnet "prompt"` (alias o id: `claude:haiku`, `claude:claude-opus-5-5`…), o
 - en `supercoder.json`: `"models": { "mi-claude": { "provider": "claude" } }` y `--model mi-claude`.
 
-Se lanza `claude -p --model <modelo> -- <prompt>` (se busca `claude` en el `PATH`) y su respuesta se emite como `text`. En este modo el bucle de herramientas, el prompt de sistema y los permisos los gestiona Claude Code, no supercoder; los tokens no se contabilizan (`0`).
+Se lanza `claude -p --model <modelo> -- <prompt>` (se busca `claude` en el `PATH`) y su respuesta se emite como `text`. En este modo el bucle de herramientas, el prompt de sistema y los permisos los gestiona Claude Code, no supercoder; los tokens salen del `result` de `claude`.
 
 ## Extensión de VS Code
 

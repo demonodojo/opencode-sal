@@ -98,6 +98,31 @@ assert json.load(open(sys.argv[1]))["model"] == "modelo-prueba"
 PY
   echo "OK --model"
 
+  # ollama:NOMBRE -> $OLLAMA_HOST, nombre sin prefijo, sin Authorization
+  rec="$e2e/ollama"
+  RECORD_DIR="$rec" start_mock "$root/tests/guiones/read_then_stop.json" 7433
+  SOSO_LLM_API_KEY=secreto OLLAMA_HOST=http://127.0.0.1:7433/ "$bin" run --yes --model ollama:qwen2.5-coder:7b --max-turns 1 "hola" >/dev/null 2>&1 || true
+  stop_mock
+  python3 - "$rec/peticion-01.json" <<'PY' || { echo "FALLO: ollama: no llegó a la petición" >&2; exit 1; }
+import json, sys
+assert json.load(open(sys.argv[1]))["model"] == "qwen2.5-coder:7b"
+PY
+  grep -q "^POST /v1/chat/completions" "$rec/cabeceras-01.txt" || { echo "FALLO: ollama: ruta" >&2; exit 1; }
+  if grep -qi "^authorization" "$rec/cabeceras-01.txt"; then echo "FALLO: ollama no debe llevar Authorization" >&2; exit 1; fi
+  echo "OK ollama"
+
+  # lmstudio:ID -> $LMSTUDIO_HOST, id tal cual, sin Authorization
+  rec="$e2e/lmstudio"
+  RECORD_DIR="$rec" start_mock "$root/tests/guiones/read_then_stop.json" 7433
+  SOSO_LLM_API_KEY=secreto LMSTUDIO_HOST=127.0.0.1:7433 "$bin" run --yes --model lmstudio:qwen/qwen3-coder --max-turns 1 "hola" >/dev/null 2>&1 || true
+  stop_mock
+  python3 - "$rec/peticion-01.json" <<'PY' || { echo "FALLO: lmstudio: no llegó a la petición" >&2; exit 1; }
+import json, sys
+assert json.load(open(sys.argv[1]))["model"] == "qwen/qwen3-coder"
+PY
+  if grep -qi "^authorization" "$rec/cabeceras-01.txt"; then echo "FALLO: lmstudio no debe llevar Authorization" >&2; exit 1; fi
+  echo "OK lmstudio"
+
   # "models": cada modelo habla con su puerto
   cfgdir="$e2e/cfg"; mkdir -p "$cfgdir"
   printf '{"model":"otro","models":{"otro":{"port":7433},"base":{"port":7422}}}\n' > "$cfgdir/supercoder.json"

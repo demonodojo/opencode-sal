@@ -1,0 +1,151 @@
+# OSC 7501 (Program Status Protocol, revisión 0.4): el agente dice al terminal qué hace
+# (working, blocked, done, error) para que lo muestre en la pestaña, en un panel o como aviso.
+#
+#   ESC ] 7501 ; state=working:app=supercoder:msg=<base64> ESC \
+#
+# Se escribe por stderr, que es el terminal del usuario también cuando la TUI lanza cada turno
+# en un proceso hijo. Con `--format json` solo se emite si se pide con `--osc7501` (lo pasa la
+# TUI); los subagentes nunca emiten para no pisar el registro del agente principal.
+# No se hace la detección `OSC 7501;?`: la respuesta del terminal llegaría por stdin mezclada
+# con la del usuario; el protocolo permite informar sin preguntar antes.
+
+import "io/io.sal"
+import "io/env.sal"
+import "salkit/base64.sal"
+import "salkit/strbuf.sal"
+import "src/agent/ctx.sal"
+
+fn osc_app() -> String
+    "supercoder"
+
+# 1 si el usuario desactivó los informes con SUPERCODER_OSC7501=0/off/false.
+fn osc_env_off() -> Int ! io, alloc
+    raw = getenv(&"SUPERCODER_OSC7501")
+    v = sk_lower(&sk_trim(&raw))
+    if v.eq("0") != 0
+        return 1
+    if v.eq("off") != 0
+        return 1
+    if v.eq("false") != 0
+        return 1
+    0
+
+# 1 si $TERM parece un terminal capaz de interpretar secuencias.
+fn osc_term_ok() -> Int ! io, alloc
+    raw = getenv(&"TERM")
+    t = sk_lower(&sk_trim(&raw))
+    if t.len() == 0
+        return 0
+    if t.eq("dumb") != 0
+        return 0
+    1
+
+# 1 si este contexto debe informar al terminal.
+fn osc_enabled(c: &Ctx) -> Int ! io, alloc
+    if ctx_depth(c) > 0
+        return 0
+    if osc_env_off() != 0
+        return 0
+    if ctx_out(c) == 1
+        return ctx_osc(c)
+    osc_term_ok()
+
+fn osc_st() -> String ! alloc
+    char_to_str(27) + char_to_str(92)
+
+# Secuencia completa: ESC ] 7501 ; cuerpo ESC \.
+fn osc_seq(body: &String) -> String ! alloc
+    char_to_str(27) + "]7501;" + body + osc_st()
+
+# Escribe un informe en el terminal (stderr); 0 si está desactivado.
+fn osc_write(c: &Ctx, body: &String) -> Int ! io, alloc
+    if osc_enabled(c) == 0
+        return 0
+    seq = osc_seq(&body)
+    Fd.new(2).write_str(&seq)
+
+# Longitud en bytes de la secuencia UTF-8 que empieza en `i` (1 si no es una cabecera válida).
+fn osc_seq_len(s: &String, i: Int) -> Int
+    n = s.len()
+    b = s.char(i)
+    if b < 128
+        return 1
+    k = 1
+    if b >= 194
+        if b < 224
+            k = 2
+        elsif b < 240
+            k = 3
+        elsif b < 245
+            k = 4
+    if i + k > n
+        return 1
+    k
+
+# Recorta a `max` bytes sin partir un carácter UTF-8.
+fn osc_truncate(s: &String, max: Int) -> String ! alloc
+    n = s.len()
+    if n <= max
+        return s.dup()
+    i = 0
+    while i < n
+        k = osc_seq_len(&s, i)
+        if i + k > max
+            return s.slice(0, i)
+        i = i + k
+    s.slice(0, n)
+
+# Texto de una línea: los caracteres de control pasan a espacios (el protocolo los prohíbe).
+fn osc_one_line(s: &String) -> String ! alloc
+    n = s.len()
+    out = ""
+    i = 0
+    space = 0
+    while i < n
+        b = s.char(i)
+        if b < 32
+            if space == 0
+                out = out + " "
+                space = 1
+        elsif b == 127
+            if space == 0
+                out = out + " "
+                space = 1
+        else
+            out = out + char_to_str(b)
+            space = 0
+        i = i + 1
+    out
+
+# Mensaje listo para `msg`: una línea, sin espacios en los extremos, <= 2000 bytes UTF-8.
+fn osc_msg(s: &String) -> String ! alloc
+    one = osc_one_line(&s)
+    t = sk_trim(&one)
+    cut = osc_truncate(&t, 2000)
+    sk_trim(&cut)
+
+# Cuerpo de un informe con `state`, `app` y, si hay, `msg` en base64.
+fn osc_body(state: &String, msg: &String) -> String ! alloc
+    body = "state=" + state + ":app=" + osc_app()
+    t = osc_msg(&msg)
+    if t.len() > 0
+        body = body + ":msg=" + b64_encode_str(&t)
+    body
+
+fn osc_working(c: &Ctx, msg: &String) -> Int ! io, alloc
+    osc_write(c, &osc_body(&"working", &msg))
+
+fn osc_done(c: &Ctx, msg: &String) -> Int ! io, alloc
+    osc_write(c, &osc_body(&"done", &msg))
+
+fn osc_error(c: &Ctx, msg: &String) -> Int ! io, alloc
+    osc_write(c, &osc_body(&"error", &msg))
+
+# El usuario tiene que actuar: `kind` es permission, question o auth.
+fn osc_blocked(c: &Ctx, kind: &String, msg: &String) -> Int ! io, alloc
+    body = "state=blocked:kind=" + kind + ":app=" + osc_app()
+    t = osc_msg(&msg)
+    if t.len() > 0
+        body = body + ":msg=" + b64_encode_str(&t)
+    osc_write(c, &body)
+

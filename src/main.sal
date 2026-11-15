@@ -11,10 +11,10 @@ fn version_str() -> String
     "supercoder-sal 0.5.0"
 
 fn usage() -> String ! alloc
-    "uso: supercoder run [--format json] [--session ID] [--continue] [--max-turns N] [--model MODELO] [--agent NOMBRE] [--interactive] [--yes] [--file RUTA]... PROMPT" + char_to_str(10) + "     supercoder session list" + char_to_str(10) + "     supercoder agents" + char_to_str(10) + "     supercoder skills" + char_to_str(10) + "     supercoder tool NOMBRE JSON [--yes]" + char_to_str(10) + "     supercoder --version"
+    "uso: supercoder run [--format json] [--session ID] [--continue] [--max-turns N] [--model MODELO] [--agent NOMBRE] [--interactive] [--yes] [--osc7501] [--file RUTA]... PROMPT" + char_to_str(10) + "     supercoder session list" + char_to_str(10) + "     supercoder agents" + char_to_str(10) + "     supercoder skills" + char_to_str(10) + "     supercoder tool NOMBRE JSON [--yes]" + char_to_str(10) + "     supercoder --version"
 
 # 1 si `a` es una opción que lleva valor.
-fn flag_takes_value(a: String) -> Int
+fn flag_takes_value(a: &String) -> Int
     if str_eq(a, "--format") != 0
         return 1
     if str_eq(a, "--session") != 0
@@ -34,7 +34,7 @@ fn flag_takes_value(a: String) -> Int
     0
 
 # Valor de una opción con valor (la última aparición gana); `dflt` si no aparece.
-fn opt_value(n: Int, name: String, alias: String, dflt: String) -> String ! alloc
+fn opt_value(n: Int, name: &String, alias: &String, dflt: &String) -> String ! alloc
     result = str_slice(dflt, 0, str_len(dflt))
     i = 2
     while i + 1 < n
@@ -47,7 +47,7 @@ fn opt_value(n: Int, name: String, alias: String, dflt: String) -> String ! allo
     result
 
 # Valores de todas las apariciones de una opción, separados por saltos de línea.
-fn opt_values(n: Int, name: String) -> String ! alloc
+fn opt_values(n: Int, name: &String) -> String ! alloc
     out = ""
     i = 2
     while i + 1 < n
@@ -56,7 +56,7 @@ fn opt_values(n: Int, name: String) -> String ! alloc
         i = i + 1
     out
 
-fn opt_flag(n: Int, name: String) -> Int ! alloc
+fn opt_flag(n: Int, name: &String) -> Int ! alloc
     i = 2
     while i < n
         if str_eq(argv(i), name) != 0
@@ -72,62 +72,65 @@ fn positional_prompt(n: Int) -> String ! alloc
     while i < n
         a = argv(i)
         if after != 0
-            x = sk_sl_push(parts, a)
+            x = sk_sl_push(&mut parts, a)
         elsif str_eq(a, "--") != 0
             after = 1
-        elsif flag_takes_value(a) != 0
+        elsif flag_takes_value(&a) != 0
             i = i + 1
-        elsif sk_starts_with(a, "-") != 0
+        elsif sk_starts_with(&a, &"-") != 0
             i = i + 0
         else
-            x = sk_sl_push(parts, a)
+            x = sk_sl_push(&mut parts, a)
         i = i + 1
-    sk_join(parts, " ")
+    sk_join(&parts, &" ")
 
 fn cmd_run() -> Int ! io, alloc
     n = argc()
     prompt = positional_prompt(n)
-    if str_len(sk_trim(prompt)) == 0
-        w = write_str_fd(2, usage() + char_to_str(10))
+    if str_len(sk_trim(&prompt)) == 0
+        w = Fd.new(2).write_str(&(usage() + char_to_str(10)))
         return 2
     out_mode = 0
-    if str_eq(opt_value(n, "--format", "--format", "text"), "json") != 0
+    if str_eq(opt_value(n, &"--format", &"--format", &"text"), "json") != 0
         out_mode = 1
-    max_turns = sk_parse_int(opt_value(n, "--max-turns", "--max-turns", "60"))
+    max_turns = sk_parse_int(&opt_value(n, &"--max-turns", &"--max-turns", &"60"))
     if max_turns < 1
         max_turns = 60
-    run_agent(prompt, out_mode, max_turns, opt_value(n, "--session", "--session", "default"), opt_flag(n, "--continue"), opt_value(n, "--model", "-m", ""), opt_value(n, "--agent", "--agent", "build"), opt_flag(n, "--interactive"), opt_flag(n, "--yes"), sk_parse_int(opt_value(n, "--depth", "--depth", "0")), opt_values(n, "--file"))
+    run_agent(&prompt, out_mode, max_turns, &opt_value(n, &"--session", &"--session", &"default"), opt_flag(n, &"--continue"), &opt_value(n, &"--model", &"-m", &""), &opt_value(n, &"--agent", &"--agent", &"build"), opt_flag(n, &"--interactive"), opt_flag(n, &"--yes"), sk_parse_int(&opt_value(n, &"--depth", &"--depth", &"0")), &opt_values(n, &"--file"), opt_flag(n, &"--osc7501"))
 
 fn cmd_skills() -> Int ! io, alloc
     all = skills_scan()
     i = 0
-    while i < sk_sl_len(all)
-        e = sk_sl_get(all, i)
+    while i < sk_sl_len(&all)
+        e = sk_sl_get(&all, i)
         flag = ""
         if skill_entry_model_ok(e) == 0
             flag = " [solo el usuario]"
-        w = write_str_fd(1, skill_entry_name(e) + flag + char_to_str(10) + "  " + skill_clip(skill_entry_desc(e)) + char_to_str(10) + "  " + skill_entry_file(e) + char_to_str(10))
+        w = Fd.new(1).write_str(&(skill_entry_name(e) + flag + char_to_str(10) + "  " + skill_clip(skill_entry_desc(e)) + char_to_str(10) + "  " + skill_entry_file(e) + char_to_str(10)))
         i = i + 1
-    if sk_sl_len(all) == 0
-        w = write_str_fd(1, "(sin skills)" + char_to_str(10))
+    if sk_sl_len(&all) == 0
+        w = Fd.new(1).write_str(&("(sin skills)" + char_to_str(10)))
     0
 
 fn cmd_tool() -> Int ! io, alloc
     if argc() < 4
-        w = write_str_fd(2, "uso: supercoder tool NOMBRE JSON [--yes]" + char_to_str(10))
+        w = Fd.new(2).write_str(&("uso: supercoder tool NOMBRE JSON [--yes]" + char_to_str(10)))
         return 2
-    run_tool(argv(2), argv(3), opt_flag(argc(), "--yes"))
+    tname = argv(2)
+    targs = argv(3)
+    run_tool(&tname, &targs, opt_flag(argc(), &"--yes"))
 
 fn cmd_session() -> Int ! io, alloc
     if argc() >= 3
         if str_eq(argv(2), "list") != 0
             ids = session_list()
             i = 0
-            while i < sk_sl_len(ids)
-                w = write_str_fd(1, sk_sl_get(ids, i) + char_to_str(10))
+            while i < sk_sl_len(&ids)
+                ln = sk_sl_get(&ids, i) + char_to_str(10)
+                w = Fd.new(1).write_str(&ln)
                 i = i + 1
             return 0
-    w = write_str_fd(2, usage() + char_to_str(10))
+    w = Fd.new(2).write_str(&(usage() + char_to_str(10)))
     2
 
 fn main() -> Int ! io, alloc
@@ -135,7 +138,7 @@ fn main() -> Int ! io, alloc
         return tui_loop()
     a1 = argv(1)
     if str_eq(a1, "--version") != 0
-        w = write_str_fd(1, version_str() + char_to_str(10))
+        w = Fd.new(1).write_str(&(version_str() + char_to_str(10)))
         return 0
     if str_eq(a1, "run") != 0
         return cmd_run()
@@ -146,7 +149,7 @@ fn main() -> Int ! io, alloc
     if str_eq(a1, "session") != 0
         return cmd_session()
     if str_eq(a1, "agents") != 0
-        w = write_str_fd(1, agents_describe(0) + char_to_str(10))
+        w = Fd.new(1).write_str(&(agents_describe(0) + char_to_str(10)))
         return 0
-    w = write_str_fd(2, usage() + char_to_str(10))
+    w = Fd.new(2).write_str(&(usage() + char_to_str(10)))
     2

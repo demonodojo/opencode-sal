@@ -8,45 +8,45 @@ import "src/events.sal"
 fn tui_eof_marker() -> String
     "###TUI_EOF###"
 
-fn tui_esc(seq: String) -> String ! alloc
+fn tui_esc(seq: &String) -> String ! alloc
     char_to_str(27) + seq
 
 fn tui_dim() -> String ! alloc
-    tui_esc("[90m")
+    tui_esc(&"[90m")
 
 fn tui_bold() -> String ! alloc
-    tui_esc("[1m")
+    tui_esc(&"[1m")
 
 fn tui_reset() -> String ! alloc
-    tui_esc("[0m")
+    tui_esc(&"[0m")
 
 fn tui_cyan() -> String ! alloc
-    tui_esc("[36m")
+    tui_esc(&"[36m")
 
 fn tui_green() -> String ! alloc
-    tui_esc("[32m")
+    tui_esc(&"[32m")
 
 fn tui_bg() -> String ! alloc
-    tui_esc("[48;5;236m")
+    tui_esc(&"[48;5;236m")
 
 fn tui_cup(row: Int, col: Int) -> String ! alloc
-    tui_esc("[" + int_to_str(row) + ";" + int_to_str(col) + "H")
+    tui_esc(&("[" + int_to_str(row) + ";" + int_to_str(col) + "H"))
 
-fn tui_nl(s: String) -> Int ! io, alloc
-    write_str_fd(1, s + "\n")
+fn tui_nl(s: &String) -> Int ! io, alloc
+    Fd.new(1).write_str(&(s + "\n"))
 
 fn tui_blanks(n: Int) -> Int ! io, alloc
     if n <= 0
         0
     else
-        _w = tui_nl("")
+        _w = tui_nl(&"")
         tui_blanks(n - 1)
 
-fn tui_pad(s: String, w: Int) -> String ! alloc
+fn tui_pad(s: &String, w: Int) -> String ! alloc
     if str_len(s) >= w
-        s
+        s.dup()
     else
-        tui_pad(s + " ", w)
+        tui_pad(&(s + " "), w)
 
 fn tui_spaces(n: Int) -> String ! alloc
     if n <= 0
@@ -55,33 +55,34 @@ fn tui_spaces(n: Int) -> String ! alloc
         " " + tui_spaces(n - 1)
 
 fn tui_clear() -> Int ! io, alloc
-    write_str_fd(1, tui_esc("[2J") + tui_esc("[H") + tui_esc("[?25l"))
+    Fd.new(1).write_str(&(tui_esc(&"[2J") + tui_esc(&"[H") + tui_esc(&"[?25l")))
 
 fn tui_enter() -> Int ! io, alloc
-    write_str_fd(1, tui_esc("[?1049h"))
+    Fd.new(1).write_str(&tui_esc(&"[?1049h"))
 
 fn tui_leave() -> Int ! io, alloc
-    _w = write_str_fd(1, tui_esc("[?25h") + tui_esc("[?1049l") + "\n")
+    _w = Fd.new(1).write_str(&(tui_esc(&"[?25h") + tui_esc(&"[?1049l") + "\n"))
     0
 
-fn tui_logo_row(left: String, right: String) -> Int ! io, alloc
-    tui_nl("                  " + tui_dim() + left + tui_reset() + tui_bold() + right + tui_reset())
+fn tui_logo_row(left: &String, right: &String) -> Int ! io, alloc
+    tui_nl(&("                  " + tui_dim() + left + tui_reset() + tui_bold() + right + tui_reset()))
 
 fn tui_logo() -> Int ! io, alloc
-    _a = tui_logo_row("                    ", " ▄")
-    _b = tui_logo_row("█▀▀█ █▀▀█ █▀▀█ █▀▀▄ ", "█▀▀▀ █▀▀█ █▀▀█ █▀▀█")
-    _c = tui_logo_row("█░░█ █░░█ █▀▀▀ █░░█ ", "█░░░ █░░█ █░░█ █▀▀▀")
-    tui_logo_row("▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀▀▀▀ ", "▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀")
+    _a = tui_logo_row(&"                    ", &" ▄")
+    _b = tui_logo_row(&"█▀▀█ █▀▀█ █▀▀█ █▀▀▄ ", &"█▀▀▀ █▀▀█ █▀▀█ █▀▀█")
+    _c = tui_logo_row(&"█░░█ █░░█ █▀▀▀ █░░█ ", &"█░░░ █░░█ █░░█ █▀▀▀")
+    tui_logo_row(&"▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀▀▀▀ ", &"▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀")
 
-fn tui_bar_row(extra: String, side_on: Int, side: String) -> String ! alloc
+fn tui_bar_row(extra: &String, side_on: Int, side: &String) -> String ! alloc
     head = "    " + tui_cyan() + "┃" + tui_reset()
     if side_on == 0
         head + extra
     else
-        head + tui_pad(extra, 49) + "  " + side
+        head + tui_pad(&extra, 49) + "  " + side
 
-fn tui_agent_row(side_on: Int, side: String) -> String ! alloc, io
-    model = cfg_model_for(cfg_load(), "")
+fn tui_agent_row(side_on: Int, side: &String) -> String ! alloc, io
+    cf = cfg_load()
+    model = cfg_model_for(&cf, &"")
     plain = 14 + str_len(model)
     head = "    " + tui_cyan() + "┃" + tui_reset() + "  " + tui_cyan() + "Build" + tui_reset() + "  " + model
     if side_on == 0
@@ -108,61 +109,61 @@ fn tui_hint_row(side_on: Int) -> String ! alloc
         head + tui_spaces(39) + "  " + mark
 
 fn tui_prompt_block(top: Int, side_on: Int) -> Int ! io, alloc
-    _a = tui_nl(tui_bar_row("", side_on, ""))
-    _b = tui_nl(tui_bar_row("  ", side_on, ""))
-    _c = tui_nl(tui_agent_row(side_on, ""))
-    _d = tui_nl(tui_stem_row(side_on))
-    _e = tui_nl(tui_hint_row(side_on))
-    write_str_fd(1, tui_esc("[?25h") + tui_cup(top + 1, 8))
+    _a = tui_nl(&tui_bar_row(&"", side_on, &""))
+    _b = tui_nl(&tui_bar_row(&"  ", side_on, &""))
+    _c = tui_nl(&tui_agent_row(side_on, &""))
+    _d = tui_nl(&tui_stem_row(side_on))
+    _e = tui_nl(&tui_hint_row(side_on))
+    Fd.new(1).write_str(&(tui_esc(&"[?25h") + tui_cup(top + 1, 8)))
 
 fn tui_draw_home() -> Int ! io, alloc
     _c = tui_clear()
     _b = tui_blanks(3)
     _l = tui_logo()
-    _g = tui_nl("")
+    _g = tui_nl(&"")
     tui_prompt_block(9, 0)
 
-fn tui_eol(s: String, i: Int, n: Int) -> Int ! alloc
+fn tui_eol(s: &String, i: Int, n: Int) -> Int ! alloc
     if i >= n
         n
     elsif str_char(s, i) == 10
         i
     else
-        tui_eol(s, i + 1, n)
+        tui_eol(&s, i + 1, n)
 
-fn tui_count_go(s: String, i: Int, acc: Int) -> Int ! alloc
+fn tui_count_go(s: &String, i: Int, acc: Int) -> Int ! alloc
     n = str_len(s)
     if i >= n
         acc
     else
-        end = tui_eol(s, i, n)
+        end = tui_eol(&s, i, n)
         if end >= n
             acc + 1
         else
-            tui_count_go(s, end + 1, acc + 1)
+            tui_count_go(&s, end + 1, acc + 1)
 
-fn tui_count(s: String) -> Int ! alloc
-    tui_count_go(s, 0, 0)
+fn tui_count(s: &String) -> Int ! alloc
+    tui_count_go(&s, 0, 0)
 
-fn tui_skip(s: String, nskip: Int) -> String ! alloc
+fn tui_skip(s: &String, nskip: Int) -> String ! alloc
     if nskip <= 0
-        s
+        s.dup()
     else
         n = str_len(s)
-        end = tui_eol(s, 0, n)
+        end = tui_eol(&s, 0, n)
         if end >= n
             ""
         else
-            tui_skip(str_slice(s, end + 1, n), nskip - 1)
+            tui_skip(&str_slice(s, end + 1, n), nskip - 1)
 
-fn tui_tail(s: String) -> String ! alloc
-    c = tui_count(s)
+fn tui_tail(s: &String) -> String ! alloc
+    c = tui_count(&s)
     if c <= 12
-        s
+        s.dup()
     else
-        tui_skip(s, c - 12)
+        tui_skip(&s, c - 12)
 
-fn tui_starts(s: String, p: String) -> Int ! alloc
+fn tui_starts(s: &String, p: &String) -> Int ! alloc
     n = str_len(p)
     if str_len(s) < n
         0
@@ -172,10 +173,10 @@ fn tui_starts(s: String, p: String) -> Int ! alloc
 fn tui_title() -> String ! alloc
     tui_bold() + "default" + tui_reset()
 
-fn tui_user_row(text: String, side: String) -> String ! alloc
-    tui_bg() + tui_pad("  " + text, 54) + tui_reset() + "  " + side
+fn tui_user_row(text: &String, side: &String) -> String ! alloc
+    tui_bg() + tui_pad(&("  " + text), 54) + tui_reset() + "  " + side
 
-fn tui_tool_row(line: String, side: String) -> String ! alloc
+fn tui_tool_row(line: &String, side: &String) -> String ! alloc
     plain = 6 + str_len(line)
     head = "    " + tui_cyan() + "┃ " + tui_reset() + line
     gap = 0
@@ -183,62 +184,62 @@ fn tui_tool_row(line: String, side: String) -> String ! alloc
         gap = 54 - plain
     head + tui_spaces(gap) + "  " + side
 
-fn tui_text_row(line: String, side: String) -> String ! alloc
-    tui_pad("      " + line, 54) + "  " + side
+fn tui_text_row(line: &String, side: &String) -> String ! alloc
+    tui_pad(&("      " + line), 54) + "  " + side
 
-fn tui_show_line(line: String, row: Int) -> String ! alloc
+fn tui_show_line(line: &String, row: Int) -> String ! alloc
     side = ""
     if row == 2
         side = tui_title()
-    if tui_starts(line, "U ") != 0
-        tui_user_row(str_slice(line, 2, str_len(line)), side)
-    elsif tui_starts(line, "tool ") != 0
-        tui_tool_row(line, side)
+    if tui_starts(&line, &"U ") != 0
+        tui_user_row(&str_slice(line, 2, str_len(line)), &side)
+    elsif tui_starts(&line, &"tool ") != 0
+        tui_tool_row(&line, &side)
     else
-        tui_text_row(line, side)
+        tui_text_row(&line, &side)
 
-fn tui_paint(s: String, i: Int, row: Int) -> Int ! io, alloc
+fn tui_paint(s: &String, i: Int, row: Int) -> Int ! io, alloc
     n = str_len(s)
     if i >= n
         0
     else
-        end = tui_eol(s, i, n)
+        end = tui_eol(&s, i, n)
         line = str_slice(s, i, end)
-        _w = tui_nl(tui_show_line(line, row))
+        _w = tui_nl(&tui_show_line(&line, row))
         if end >= n
             1
         else
-            1 + tui_paint(s, end + 1, row + 1)
+            1 + tui_paint(&s, end + 1, row + 1)
 
 fn tui_draw_session() -> Int ! io, alloc
     _c = tui_clear()
-    _b = tui_nl("")
-    view = tui_tail(ev_tui_log_read())
-    n = tui_paint(view, 0, 2)
-    _g = tui_nl("")
+    _b = tui_nl(&"")
+    view = tui_tail(&ev_tui_log_read())
+    n = tui_paint(&view, 0, 2)
+    _g = tui_nl(&"")
     tui_prompt_block(n + 3, 1)
 
-fn tui_read_line_go(acc: String) -> String ! io, alloc
+fn tui_read_line_go(acc: &String) -> String ! io, alloc
     buf = bytes_new(1)
-    n = read_fd(0, bytes_ptr(buf), 1)
+    n = Fd.new(0).read(bytes_ptr(buf), 1)
     if n <= 0
         if str_len(acc) <= 0
             tui_eof_marker()
         else
-            acc
+            acc.dup()
     else
         c = bytes_get_u8(buf, 0)
         if c == 10
-            acc
+            acc.dup()
         elsif c == 13
             acc
         else
-            tui_read_line_go(acc + char_to_str(c))
+            tui_read_line_go(&(acc + char_to_str(c)))
 
-fn tui_is_eof(line: String) -> Int ! alloc
+fn tui_is_eof(line: &String) -> Int ! alloc
     str_eq(line, tui_eof_marker())
 
-fn tui_is_quit(line: String) -> Int ! alloc
+fn tui_is_quit(line: &String) -> Int ! alloc
     if str_eq(line, "exit") != 0
         1
     elsif str_eq(line, "quit") != 0
@@ -253,23 +254,23 @@ fn tui_is_quit(line: String) -> Int ! alloc
 # Ejecutable que corre cada turno: argv(0) o /bin/supercoder.
 fn tui_binary() -> String ! io, alloc
     a0 = argv(0)
-    if sk_contains(a0, "/") != 0
+    if sk_contains(&a0, &"/") != 0
         return a0
     "/bin/supercoder"
 
 # Línea de registro para un evento de herramienta en marcha (también dentro de subagentes).
-fn tui_log_tool(d: Int, ev: Int) -> Int ! io, alloc
-    if str_eq(json_get_str(d, ev, "type"), "tool_use") != 0
-        part = json_get(d, ev, "part")
-        if str_eq(json_get_str(d, json_get(d, part, "state"), "status"), "running") != 0
-            return ev_tui_log_add("tool " + json_get_str(d, part, "tool"))
+fn tui_log_tool(d: &JsonDoc, ev: Int) -> Int ! io, alloc
+    if str_eq(json_get_str(&d, ev, &"type"), "tool_use") != 0
+        part = json_get(&d, ev, &"part")
+        if str_eq(json_get_str(&d, json_get(&d, part, &"state"), &"status"), "running") != 0
+            return ev_tui_log_add(&("tool " + json_get_str(&d, part, &"tool")))
     0
 
 # Pregunta si se concede un permiso: devuelve la respuesta para el hijo.
-fn tui_ask_permission(title: String) -> String ! io, alloc
-    _l = ev_tui_log_add("permiso: " + title + "  [s]i / [a]siempre / [N]o")
+fn tui_ask_permission(title: &String) -> String ! io, alloc
+    _l = ev_tui_log_add(&("permiso: " + title + "  [s]i / [a]siempre / [N]o"))
     _d = tui_draw_session()
-    ans = sk_lower(sk_trim(tui_read_line_go("")))
+    ans = sk_lower(&sk_trim(&tui_read_line_go(&"")))
     if str_eq(ans, "s") != 0
         return "once"
     if str_eq(ans, "si") != 0
@@ -283,48 +284,50 @@ fn tui_ask_permission(title: String) -> String ! io, alloc
 # Un turno: lanza `supercoder run` como proceso hijo y vuelca sus eventos en el registro.
 fn tui_turn(line: String, cont: Int) -> Int ! io, alloc
     args = sk_sl_new()
-    _a1 = sk_sl_push(args, "run")
-    _a2 = sk_sl_push(args, "--format")
-    _a3 = sk_sl_push(args, "json")
-    _a4 = sk_sl_push(args, "--session")
-    _a5 = sk_sl_push(args, "default")
-    _a6 = sk_sl_push(args, "--interactive")
+    _a1 = sk_sl_push(&mut args, "run")
+    _a2 = sk_sl_push(&mut args, "--format")
+    _a3 = sk_sl_push(&mut args, "json")
+    _a4 = sk_sl_push(&mut args, "--session")
+    _a5 = sk_sl_push(&mut args, "default")
+    _a6 = sk_sl_push(&mut args, "--interactive")
+    # El hijo habla JSON por stdout; los informes OSC 7501 van por su stderr (nuestro terminal).
+    _a6b = sk_sl_push(&mut args, "--osc7501")
     if cont != 0
-        _a7 = sk_sl_push(args, "--continue")
-    _a8 = sk_sl_push(args, "--")
-    _a9 = sk_sl_push(args, line)
-    h = child_start(tui_binary(), args)
+        _a7 = sk_sl_push(&mut args, "--continue")
+    _a8 = sk_sl_push(&mut args, "--")
+    _a9 = sk_sl_push(&mut args, line)
+    h = child_start(&tui_binary(), &args)
     if h < 0
-        return ev_tui_log_add("error: no se pudo lanzar " + tui_binary())
+        return ev_tui_log_add(&("error: no se pudo lanzar " + tui_binary()))
     go = 1
     while go != 0
         raw = child_read_line(h, 7200000)
         if str_eq(raw, char_to_str(4)) != 0
             go = 0
         else
-            d = json_parse(raw)
-            if json_ok(d) != 0
-                r = json_root(d)
-                t = json_get_str(d, r, "type")
+            d = json_parse(&raw)
+            if json_ok(&d) != 0
+                r = json_root(&d)
+                t = json_get_str(&d, r, &"type")
                 if str_eq(t, "text") != 0
-                    _t = ev_tui_log_add(json_get_str(d, json_get(d, r, "part"), "text"))
+                    _t = ev_tui_log_add(&json_get_str(&d, json_get(&d, r, &"part"), &"text"))
                 elsif str_eq(t, "status") != 0
-                    _st = ev_tui_log_add("· " + json_get_str(d, json_get(d, r, "part"), "text"))
+                    _st = ev_tui_log_add(&("· " + json_get_str(&d, json_get(&d, r, &"part"), &"text")))
                 elsif str_eq(t, "error") != 0
-                    em = json_path(d, r, "error.data.message")
+                    em = json_path(&d, r, &"error.data.message")
                     if em >= 0
-                        _e = ev_tui_log_add("error: " + json_str(d, em))
+                        _e = ev_tui_log_add(&("error: " + json_str(&d, em)))
                 elsif str_eq(t, "tool_use") != 0
-                    _u = tui_log_tool(d, r)
+                    _u = tui_log_tool(&d, r)
                 elsif str_eq(t, "subagent") != 0
-                    inner = json_path(d, r, "part.event")
+                    inner = json_path(&d, r, &"part.event")
                     if inner >= 0
-                        _s = tui_log_tool(d, inner)
+                        _s = tui_log_tool(&d, inner)
                 elsif str_eq(t, "permission_request") != 0
-                    pt = json_get(d, r, "part")
-                    reply = tui_ask_permission(json_get_str(d, pt, "title"))
-                    msg = jb_obj(jb_kv("type", json_quote("permission_reply")) + "," + jb_kv("id", json_quote(json_get_str(d, pt, "id"))) + "," + jb_kv("reply", json_quote(reply)))
-                    _w = child_write_line(h, msg)
+                    pt = json_get(&d, r, &"part")
+                    reply = tui_ask_permission(&json_get_str(&d, pt, &"title"))
+                    msg = jb_obj(&(jb_kv(&"type", &json_quote(&"permission_reply")) + "," + jb_kv(&"id", &json_quote(&json_get_str(&d, pt, &"id"))) + "," + jb_kv(&"reply", &json_quote(&reply))))
+                    _w = child_write_line(h, &msg)
                 if str_eq(t, "permission_request") == 0
                     _dr = tui_draw_session()
     child_finish(h)
@@ -334,15 +337,15 @@ fn tui_loop_go(turn: Int) -> Int ! io, alloc
         _h = tui_draw_home()
     else
         _s = tui_draw_session()
-    line = tui_read_line_go("")
-    if tui_is_eof(line) != 0
+    line = tui_read_line_go(&"")
+    if tui_is_eof(&line) != 0
         tui_leave()
-    elsif tui_is_quit(line) != 0
+    elsif tui_is_quit(&line) != 0
         tui_leave()
     elsif str_len(line) <= 0
         tui_loop_go(turn)
     else
-        _u = ev_tui_log_add("U " + line)
+        _u = ev_tui_log_add(&("U " + line))
         cont = 0
         if turn > 0
             cont = 1

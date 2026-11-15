@@ -1,7 +1,7 @@
 import "io/fs.sal"
 
-fn validar_copia(dir: String) -> Int ! io, alloc
-    write_file_path(dir + "/verificado", "ok\n")
+fn validar_copia(dir: &String) -> Int ! io, alloc
+    Path.new(dir + "/verificado").write(&"ok\n")
 
-fn promover_base(dir: String) -> Int ! io, alloc
-    write_file_path(dir + "/promovido", "1\n")
+fn promover_base(dir: &String) -> Int ! io, alloc
+    Path.new(dir + "/promovido").write(&"1\n")
