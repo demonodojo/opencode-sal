@@ -112,6 +112,35 @@ fn oai_parse_calls(d: &JsonDoc, tcs: Int) -> List[Call] ! alloc
         n = json_next(&d, n)
     calls
 
+# Algunos servidores OpenAI compatibles separan el análisis del contenido final.
+fn oai_text_field(d: &JsonDoc, node: Int, key: &String) -> String ! alloc
+    n = json_get(d, node, &key)
+    if n >= 0
+        if json_is_string(d, n) != 0
+            return json_str(d, n).dup()
+    ""
+
+fn oai_reasoning(d: &JsonDoc, node: Int) -> String ! alloc
+    s = oai_text_field(d, node, &"reasoning_content")
+    if str_len(s) > 0
+        return s
+    s = oai_text_field(d, node, &"reasoning")
+    if str_len(s) > 0
+        return s
+    oai_text_field(d, node, &"thinking")
+
+fn oai_message_text(d: &JsonDoc, node: Int) -> String ! alloc
+    content = oai_text_field(d, node, &"content")
+    thinking = oai_reasoning(d, node)
+    if str_len(thinking) <= 0
+        return content
+    if sk_contains(&content, &"<think>") != 0
+        return content
+    prefix = "<think>" + char_to_str(10) + thinking + char_to_str(10)
+    if sk_contains(&content, &"</think>") != 0
+        return prefix + content
+    prefix + "</think>" + char_to_str(10) + content
+
 fn oai_parse(status: Int, body: &String) -> PrResp ! alloc
     if status != 200
         return pr_fail(&oai_error_text(&body), status)
@@ -122,11 +151,7 @@ fn oai_parse(status: Int, body: &String) -> PrResp ! alloc
     msg = json_path(&d, root, &"choices.0.message")
     if msg < 0
         return pr_fail(&"response without choices[0].message", status)
-    text = ""
-    cn = json_get(&d, msg, &"content")
-    if cn >= 0
-        if json_is_string(&d, cn) != 0
-            text = json_str(&d, cn).dup()
+    text = oai_message_text(&d, msg)
     calls = List.new[Call]()
     tcs = json_get(&d, msg, &"tool_calls")
     if tcs >= 0
@@ -154,13 +179,52 @@ fn oai_chat_plain(c: &Ctx) -> PrResp ! io, alloc
         return pr_fail(&oai_conn_hint(cfg, &model, http_error(&r)), 0)
     oai_parse(http_status(&r), http_body(&r))
 
-# Asegura que las listas por índice llegan hasta `idx`.
-fn oai_grow(ids: &mut List[String], names: &mut List[String], frags: &mut List[List[String]], idx: Int) -> Int ! alloc
-    while ids.len() <= idx
-        ids.push("")
-        names.push("")
-        frags.push(List.new[String]())
+# Fragmentos de una llamada indexada en el flujo SSE.
+struct StreamCall
+    id: String
+    name: String
+    fragments: List[String]
+
+struct StreamCalls
+    items: List[StreamCall]
+
+method StreamCalls.ensure(&mut self, idx: Int) -> Int ! alloc
+    while self.items.len() <= idx
+        self.items.push(StreamCall(d"", d"", List.new[String]()))
     0
+
+method StreamCalls.add_delta(&mut self, idx: Int, d: &JsonDoc, tc: Int) -> Int ! alloc
+    self.ensure(idx)
+    item = self.items.get_mut(idx)
+    tid = json_get_str(d, tc, &"id")
+    if str_len(tid) > 0
+        item.id = tid.dup()
+    fnode = json_get(d, tc, &"function")
+    if fnode >= 0
+        fname = json_get_str(d, fnode, &"name")
+        if str_len(fname) > 0
+            item.name = fname.dup()
+        af = json_get(d, fnode, &"arguments")
+        if af >= 0
+            if json_is_string(d, af) != 0
+                item.fragments.push(json_str(d, af).dup())
+    0
+
+method StreamCalls.finish(&self) -> List[Call] ! alloc
+    calls = List.new[Call]()
+    i = 0
+    while i < self.items.len()
+        item = self.items.get(i)
+        if str_len(item.name) > 0
+            args = sk_join(&item.fragments, &"")
+            if str_len(sk_trim(&args)) == 0
+                args = "{}"
+            id = item.id.dup()
+            if str_len(id) == 0
+                id = "call_" + int_to_str(i + 1)
+            calls.push(call_new(&id, &item.name, &args))
+        i = i + 1
+    calls
 
 # Petición con streaming: acumula el texto y las llamadas por índice y emite text_delta.
 fn oai_chat_stream(c: &Ctx) -> PrResp ! io, alloc
@@ -175,10 +239,9 @@ fn oai_chat_stream(c: &Ctx) -> PrResp ! io, alloc
         x = hs_close(&mut h)
         return oai_parse(hs_status(&h), &rest)
     parts = sk_sl_new()
-    ids = sk_sl_new()
-    names = sk_sl_new()
-    frags = List.new[List[String]]()
+    stream_calls = StreamCalls(List.new[StreamCall]())
     finish = ""
+    thinking_open = 0
     inp = 0
     out = 0
     go = 1
@@ -196,13 +259,27 @@ fn oai_chat_stream(c: &Ctx) -> PrResp ! io, alloc
                     r = json_root(&d)
                     delta = json_path(&d, r, &"choices.0.delta")
                     if delta >= 0
-                        cn = json_get(&d, delta, &"content")
-                        if cn >= 0
-                            if json_is_string(&d, cn) != 0
-                                piece = json_str(&d, cn)
-                                if str_len(piece) > 0
-                                    parts.push(piece.dup())
-                                    y = ev_text_delta(c, piece)
+                        piece = ""
+                        end_thinking = ""
+                        thinking = oai_reasoning(&d, delta)
+                        if str_len(thinking) > 0
+                            if thinking_open == 0
+                                piece = "<think>" + char_to_str(10) + thinking
+                                thinking_open = 1
+                            else
+                                piece = thinking
+                            parts.push(piece.dup())
+                            y = ev_text_delta(c, &piece)
+                        content = oai_text_field(&d, delta, &"content")
+                        if str_len(content) > 0
+                            if thinking_open != 0
+                                if sk_contains(&content, &"</think>") == 0
+                                    end_thinking = "</think>" + char_to_str(10)
+                                    parts.push(end_thinking.dup())
+                                    y = ev_text_delta(c, &end_thinking)
+                                thinking_open = 0
+                            parts.push(content.dup())
+                            y = ev_text_delta(c, &content)
                         tcs = json_get(&d, delta, &"tool_calls")
                         if tcs >= 0
                             k = 0
@@ -212,19 +289,7 @@ fn oai_chat_stream(c: &Ctx) -> PrResp ! io, alloc
                                 in_node = json_get(&d, tc, &"index")
                                 if in_node >= 0
                                     idx = json_int(&d, in_node)
-                                z = oai_grow(&mut ids, &mut names, &mut frags, idx)
-                                tid = json_get_str(&d, tc, &"id")
-                                if str_len(tid) > 0
-                                    ids.set(idx, tid.dup())
-                                fnode = json_get(&d, tc, &"function")
-                                if fnode >= 0
-                                    fname = json_get_str(&d, fnode, &"name")
-                                    if str_len(fname) > 0
-                                        names.set(idx, fname.dup())
-                                    af = json_get(&d, fnode, &"arguments")
-                                    if af >= 0
-                                        if json_is_string(&d, af) != 0
-                                            frags.get_mut(idx).push(json_str(&d, af).dup())
+                                z = stream_calls.add_delta(idx, &d, tc)
                                 k = k + 1
                                 tc = json_next(&d, tc)
                     fr = json_path(&d, r, &"choices.0.finish_reason")
@@ -237,20 +302,12 @@ fn oai_chat_stream(c: &Ctx) -> PrResp ! io, alloc
                         out = json_get_int(&d, un, &"completion_tokens")
     err = hs_error(&h).dup()
     x = hs_close(&mut h)
+    if thinking_open != 0
+        end_tag = "</think>" + char_to_str(10)
+        parts.push(end_tag.dup())
+        y = ev_text_delta(c, &end_tag)
     text = sk_join(&parts, &"")
-    calls = List.new[Call]()
-    i = 0
-    while i < ids.len()
-        nm = sk_sl_get(&names, i)
-        if str_len(nm) > 0
-            args = sk_join(frags.get(i), &"")
-            if str_len(sk_trim(&args)) == 0
-                args = "{}"
-            id = sk_sl_get(&ids, i)
-            if str_len(id) == 0
-                id = "call_" + int_to_str(i + 1)
-            y = calls.push(call_new(&id, nm, &args))
-        i = i + 1
+    calls = stream_calls.finish()
     if str_len(text) == 0
         if calls.len() == 0
             if str_len(err) > 0

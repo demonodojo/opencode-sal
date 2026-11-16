@@ -6,16 +6,13 @@ import "salkit/json.sal"
 import "salkit/strbuf.sal"
 import "salkit/fsx.sal"
 
-# El struct guarda un solo campo (lista) para no depender del drop de varios campos String.
 struct ToolResult
-    cells: List[String]
+    failed: Int
+    output: String
+    title: String
 
 fn tr_new(failed: Int, output: &String, title: &String) -> ToolResult ! alloc
-    c = List.new[String]()
-    c.push(int_to_str(failed))
-    c.push(output.dup())
-    c.push(title.dup())
-    ToolResult(c)
+    ToolResult(failed, output.dup(), title.dup())
 
 fn tr_ok(output: &String, title: &String) -> ToolResult ! alloc
     tr_new(0, &output, &title)
@@ -24,44 +21,66 @@ fn tr_err(msg: &String) -> ToolResult ! alloc
     tr_new(1, &msg, &"error")
 
 fn tr_failed(r: &ToolResult) -> Int
-    sk_parse_int(r.cells.get(0))
+    r.failed()
 
 fn tr_output(r: &ToolResult) -> String ! alloc
-    r.cells.get(1).dup()
+    r.output()
 
 fn tr_title(r: &ToolResult) -> String ! alloc
-    r.cells.get(2).dup()
+    r.title()
+
+method ToolResult.failed(&self) -> Int
+    self.failed
+
+method ToolResult.output(&self) -> String ! alloc
+    self.output.dup()
+
+method ToolResult.title(&self) -> String ! alloc
+    self.title.dup()
+
+struct ToolArgs['a]
+    doc: &'a JsonDoc
+    node: Int
 
 # Primer argumento presente entre los alias "a,b,c"; -1 si no hay ninguno.
 fn arg_node(d: &JsonDoc, n: Int, names: &String) -> Int ! alloc
-    if json_kind(&d, n) != 6
+    ToolArgs(d, n).find(names)
+
+method ToolArgs.find(&self, names: &String) -> Int ! alloc
+    if json_kind(self.doc, self.node) != 6
         return 0 - 1
     parts = sk_split_char(&names, 44)
     i = 0
     cnt = sk_sl_len(&parts)
     while i < cnt
-        k = json_get(&d, n, sk_sl_get(&parts, i))
+        k = json_get(self.doc, self.node, sk_sl_get(&parts, i))
         if k >= 0
             return k
         i = i + 1
     0 - 1
 
 fn arg_has(d: &JsonDoc, n: Int, names: &String) -> Int ! alloc
-    if arg_node(&d, n, &names) >= 0
+    ToolArgs(d, n).has(names)
+
+method ToolArgs.has(&self, names: &String) -> Int ! alloc
+    if self.find(names) >= 0
         1
     else
         0
 
 # Texto del argumento (los números y booleanos se convierten); `dflt` si falta o es null.
 fn arg_str(d: &JsonDoc, n: Int, names: &String, dflt: String) -> String ! alloc
-    k = arg_node(&d, n, &names)
+    ToolArgs(d, n).string(names, dflt)
+
+method ToolArgs.string(&self, names: &String, dflt: String) -> String ! alloc
+    k = self.find(names)
     if k < 0
         return dflt
-    kind = json_kind(&d, k)
+    kind = json_kind(self.doc, k)
     if kind == 3
-        return json_str(&d, k).dup()
+        return json_str(self.doc, k).dup()
     if kind == 4
-        return json_str(&d, k).dup()
+        return json_str(self.doc, k).dup()
     if kind == 2
         return "true"
     if kind == 1
@@ -69,29 +88,35 @@ fn arg_str(d: &JsonDoc, n: Int, names: &String, dflt: String) -> String ! alloc
     dflt
 
 fn arg_int(d: &JsonDoc, n: Int, names: &String, dflt: Int) -> Int ! alloc
-    k = arg_node(&d, n, &names)
+    ToolArgs(d, n).integer(names, dflt)
+
+method ToolArgs.integer(&self, names: &String, dflt: Int) -> Int ! alloc
+    k = self.find(names)
     if k < 0
         return dflt
-    kind = json_kind(&d, k)
+    kind = json_kind(self.doc, k)
     if kind == 4
-        return json_int(&d, k)
+        return json_int(self.doc, k)
     if kind == 3
-        s = sk_trim(json_str(&d, k))
+        s = sk_trim(json_str(self.doc, k))
         if sk_is_int(&s) != 0
             return sk_parse_int(&s)
     dflt
 
 fn arg_bool(d: &JsonDoc, n: Int, names: &String, dflt: Int) -> Int ! alloc
-    k = arg_node(&d, n, &names)
+    ToolArgs(d, n).boolean(names, dflt)
+
+method ToolArgs.boolean(&self, names: &String, dflt: Int) -> Int ! alloc
+    k = self.find(names)
     if k < 0
         return dflt
-    kind = json_kind(&d, k)
+    kind = json_kind(self.doc, k)
     if kind == 2
         return 1
     if kind == 1
         return 0
     if kind == 3
-        s = sk_lower(&sk_trim(json_str(&d, k)))
+        s = sk_lower(&sk_trim(json_str(self.doc, k)))
         if str_eq(s, "true") != 0
             return 1
         if str_eq(s, "false") != 0

@@ -17,15 +17,16 @@ fn bash_max_output() -> Int
     30000
 
 fn tool_bash(c: &Ctx, d: &JsonDoc, a: Int) -> ToolResult ! io, alloc
-    cmd = arg_str(&d, a, &"command,cmd,script", "")
+    args = ToolArgs(d, a)
+    cmd = args.string(&"command,cmd,script", "")
     if str_len(sk_trim(&cmd)) == 0
         return tr_err(&"command must not be empty")
-    timeout = arg_int(&d, a, &"timeout,timeout_ms", bash_default_timeout())
+    timeout = args.integer(&"timeout,timeout_ms", bash_default_timeout())
     if timeout < 1000
         timeout = bash_default_timeout()
     if timeout > bash_max_timeout()
         timeout = bash_max_timeout()
-    workdir = arg_str(&d, a, &"workdir,cwd,dir", "")
+    workdir = args.string(&"workdir,cwd,dir", "")
     wd = ""
     if str_len(workdir) > 0
         wd = path_abs(&workdir)
@@ -40,7 +41,7 @@ fn tool_bash(c: &Ctx, d: &JsonDoc, a: Int) -> ToolResult ! io, alloc
     timed_out = proc_timed_out(&r)
     o = proc_output(&r)
     out = str_slice(o, 0, str_len(o))
-    title = arg_str(&d, a, &"description", "")
+    title = args.string(&"description", "")
     if str_len(title) == 0
         title = sk_truncate_middle(&cmd, 60)
     if timed_out != 0

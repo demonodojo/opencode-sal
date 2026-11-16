@@ -1,0 +1,61 @@
+# Preguntas al usuario, compartidas por el agente y los subagentes.
+import "src/perm.sal"
+import "src/tools/common.sal"
+import "src/events.sal"
+import "src/osc.sal"
+
+fn question_ask(c: &mut Ctx, question: &String, options: &String) -> String ! io, alloc
+    if ctx_interactive(c) == 0
+        return char_to_str(4)
+    _o = osc_blocked(c, &"question", &question)
+    answer = char_to_str(4)
+    if ctx_out(c) == 1
+        id = "question_" + int_to_str(ctx_next_call(c))
+        _e = ev_question(c, &id, &question, &options)
+        done = 0
+        while done == 0
+            line = perm_read_line()
+            if str_eq(line, char_to_str(4)) != 0
+                done = 1
+            else
+                d = json_parse(&line)
+                if json_ok(&d) != 0
+                    r = json_root(&d)
+                    if str_eq(json_get_str(&d, r, &"type"), "question_reply") != 0
+                        if str_eq(json_get_str(&d, r, &"id"), id) != 0
+                            answer = json_get_str(&d, r, &"answer").dup()
+                            done = 1
+    else
+        display = "\n" + question + "\n"
+        od = json_parse(options)
+        item = json_first(&od, json_root(&od))
+        index = 1
+        while item >= 0
+            display = display + int_to_str(index) + ". " + json_str(&od, item) + "\n"
+            index = index + 1
+            item = json_next(&od, item)
+        _w = Fd.new(2).write_str(&(display + "> "))
+        answer = perm_read_line()
+    _o2 = osc_working(c, &"Continuing after question")
+    answer
+
+fn tool_question(c: &mut Ctx, d: &JsonDoc, a: Int) -> ToolResult ! io, alloc
+    args = ToolArgs(d, a)
+    question = sk_trim(&args.string(&"question", ""))
+    if str_len(question) == 0
+        return tr_err(&"The question must not be empty")
+    options = "[]"
+    node = json_get(d, a, &"options")
+    if node >= 0
+        if json_kind(d, node) != 5
+            return tr_err(&"options must be an array of strings")
+        item = json_first(d, node)
+        while item >= 0
+            if json_kind(d, item) != 3
+                return tr_err(&"options must be an array of strings")
+            item = json_next(d, item)
+        options = json_dump(d, node)
+    answer = question_ask(c, &question, &options)
+    if str_eq(answer, char_to_str(4)) != 0
+        return tr_err(&"User input is unavailable or cancelled")
+    tr_ok(&answer, &question)

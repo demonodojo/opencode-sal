@@ -1,12 +1,30 @@
 import "io/io.sal"
+import "io/process.sal"
+import "io/pipe.sal"
+import "io/rand.sal"
+import "salkit/fsx.sal"
 import "salkit/json.sal"
 import "salkit/strbuf.sal"
 import "src/agent/child.sal"
+import "src/agent/vision.sal"
 import "src/config.sal"
+import "src/clipboard.sal"
 import "src/events.sal"
+import "src/osc.sal"
+import "src/util.sal"
 
 fn tui_eof_marker() -> String
     "###TUI_EOF###"
+
+fn tui_ctrlc_marker() -> String
+    "###TUI_CTRLC###"
+
+fn tui_is_ctrlc(line: &String) -> Int ! alloc
+    str_eq(line, tui_ctrlc_marker())
+
+# Texto de la fila de estado cuando ya se pulsó Ctrl-C una vez.
+fn tui_ctrlc_hint() -> String ! alloc, io
+    "Ctrl-C otra vez para salir"
 
 fn tui_esc(seq: &String) -> String ! alloc
     char_to_str(27) + seq
@@ -25,6 +43,9 @@ fn tui_cyan() -> String ! alloc
 
 fn tui_green() -> String ! alloc
     tui_esc(&"[32m")
+
+fn tui_blue() -> String ! alloc
+    tui_esc(&"[38;5;81m")
 
 fn tui_bg() -> String ! alloc
     tui_esc(&"[48;5;236m")
@@ -60,18 +81,85 @@ fn tui_clear() -> Int ! io, alloc
 fn tui_enter() -> Int ! io, alloc
     Fd.new(1).write_str(&tui_esc(&"[?1049h"))
 
-fn tui_leave() -> Int ! io, alloc
-    _w = Fd.new(1).write_str(&(tui_esc(&"[?25h") + tui_esc(&"[?1049l") + "\n"))
+fn tui_leave(raw: Int) -> Int ! io, alloc
+    _w = Fd.new(1).write_str(&(tui_esc(&"[?25h") + tui_esc(&"[?1049l")))
+    _r = tui_tty_off(raw)
     0
 
+# Ejecuta un comando por `/bin/sh` con la entrada del terminal heredada.
+fn tui_sh(cmd: &String) -> Int ! io, alloc
+    pid = spawn_io_4(&"/bin/sh", &"-c", cmd, &"", 0, SPAWN_FD_CLOSED, SPAWN_FD_CLOSED, 0 - 1)
+    if pid < 0
+        return 0 - 1
+    Wait.from_raw(wait_pid(pid)).exit_code()
+
+# Consulta el tamaño en cada repintado; con entrada no interactiva usa 24x80.
+fn tui_size() -> String ! io, alloc
+    packed = pipe_create_go()
+    if packed < 0
+        return "24 80"
+    size_pipe = Pipe.from_packed(packed)
+    rd = size_pipe.read_fd()
+    wr = size_pipe.write_fd()
+    pid = spawn_io_4(&"/bin/sh", &"-c", &"stty size", &"", 0, wr, SPAWN_FD_CLOSED, 0 - 1)
+    Fd.new(wr).close()
+    if pid < 0
+        Fd.new(rd).close()
+        return "24 80"
+    buf = Bytes.new(64)
+    n = Fd.new(rd).read(buf.ptr(), 64)
+    Fd.new(rd).close()
+    _wait = wait_pid(pid)
+    if n <= 0
+        "24 80"
+    else
+        bytes_view(buf, 0, n).to_str()
+
+fn tui_dimension(size: &String, column: Int) -> Int ! alloc
+    i = 0
+    n = str_len(size)
+    value = 0
+    part = 0
+    while i < n
+        c = str_char(size, i)
+        if c >= 48
+            if c <= 57
+                if part == column
+                    value = value * 10 + c - 48
+            else
+                if value > 0
+                    return value
+        else
+            if value > 0
+                return value
+            if c == 32
+                part = 1
+        i = i + 1
+    value
+
+# Terminal en modo carácter: Ctrl-C llega como byte 3 (no como SIGINT, que cerraría la TUI),
+# el eco de la línea lo hacemos nosotros y las lecturas no esperan al Intro.
+# Devuelve 1 si se pudo activar; si no hay `/bin/sh` o `stty` (p. ej. soso), sigue en modo normal.
+fn tui_tty_on() -> Int ! io, alloc
+    if tui_sh(&"stty -icanon -isig -echo min 1 time 0") == 0
+        1
+    else
+        0
+
+fn tui_tty_off(raw: Int) -> Int ! io, alloc
+    if raw == 0
+        0
+    else
+        tui_sh(&"stty icanon isig echo")
+
+# Logo: "super" tenue + "coder" en negrita, en el mismo tipo de bloque que el resto.
 fn tui_logo_row(left: &String, right: &String) -> Int ! io, alloc
-    tui_nl(&("                  " + tui_dim() + left + tui_reset() + tui_bold() + right + tui_reset()))
+    tui_nl(&("                " + tui_dim() + left + tui_reset() + tui_bold() + right + tui_reset()))
 
 fn tui_logo() -> Int ! io, alloc
-    _a = tui_logo_row(&"                    ", &" ▄")
-    _b = tui_logo_row(&"█▀▀█ █▀▀█ █▀▀█ █▀▀▄ ", &"█▀▀▀ █▀▀█ █▀▀█ █▀▀█")
-    _c = tui_logo_row(&"█░░█ █░░█ █▀▀▀ █░░█ ", &"█░░░ █░░█ █░░█ █▀▀▀")
-    tui_logo_row(&"▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀▀▀▀ ", &"▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀")
+    _a = tui_logo_row(&"█▀▀▀ █░░█ █▀▀█ █▀▀█ █▀▀▄ ", &"█▀▀▀ █▀▀█ █▀▀█ █▀▀█ █▀▀▄")
+    _b = tui_logo_row(&"▀▀▀█ █░░█ █░░█ █▀▀▀ █░░░ ", &"█░░░ █░░█ █░░█ █▀▀▀ █░░░")
+    tui_logo_row(&"▀▀▀▀ ▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀▀▀▀ ", &"▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀")
 
 fn tui_bar_row(extra: &String, side_on: Int, side: &String) -> String ! alloc
     head = "    " + tui_cyan() + "┃" + tui_reset()
@@ -80,11 +168,9 @@ fn tui_bar_row(extra: &String, side_on: Int, side: &String) -> String ! alloc
     else
         head + tui_pad(&extra, 49) + "  " + side
 
-fn tui_agent_row(side_on: Int, side: &String) -> String ! alloc, io
-    cf = cfg_load()
-    model = cfg_model_for(&cf, &"")
-    plain = 14 + str_len(model)
-    head = "    " + tui_cyan() + "┃" + tui_reset() + "  " + tui_cyan() + "Build" + tui_reset() + "  " + model
+fn tui_agent_row(model: &String, side_on: Int, side: &String) -> String ! alloc
+    plain = 17 + str_len(model)
+    head = "    " + tui_cyan() + "┃" + tui_reset() + "  " + tui_cyan() + tui_bold() + "Build" + tui_reset() + "  " + tui_dim() + model + tui_reset()
     if side_on == 0
         head
     else
@@ -101,27 +187,33 @@ fn tui_stem_row(side_on: Int) -> String ! alloc
         head + tui_spaces(49) + "  "
 
 fn tui_hint_row(side_on: Int) -> String ! alloc
-    head = "    " + tui_dim() + "exit  leave" + tui_reset()
+    head = "    " + tui_dim() + "Ctrl-V imagen   PgUp/PgDn historial   /models modelos   exit salir" + tui_reset()
     if side_on == 0
         head
     else
         mark = tui_green() + "• " + tui_reset() + tui_bold() + "SuperCoder" + tui_reset() + "  " + tui_dim() + "0.5.0" + tui_reset()
         head + tui_spaces(39) + "  " + mark
 
-fn tui_prompt_block(top: Int, side_on: Int) -> Int ! io, alloc
+fn tui_prompt_block(top: Int, side_on: Int, model: &String) -> Int ! io, alloc
     _a = tui_nl(&tui_bar_row(&"", side_on, &""))
     _b = tui_nl(&tui_bar_row(&"  ", side_on, &""))
-    _c = tui_nl(&tui_agent_row(side_on, &""))
+    _c = tui_nl(&tui_agent_row(&model, side_on, &""))
     _d = tui_nl(&tui_stem_row(side_on))
     _e = tui_nl(&tui_hint_row(side_on))
     Fd.new(1).write_str(&(tui_esc(&"[?25h") + tui_cup(top + 1, 8)))
 
-fn tui_draw_home() -> Int ! io, alloc
+fn tui_draw_home(model: &String) -> Int ! io, alloc
     _c = tui_clear()
     _b = tui_blanks(3)
     _l = tui_logo()
-    _g = tui_nl(&"")
-    tui_prompt_block(9, 0)
+    size = tui_size()
+    height = tui_dimension(&size, 0)
+    if height < 12
+        height = 12
+    top = height - 5
+    _g = Fd.new(1).write_str(&tui_cup(top, 1))
+    _p = tui_prompt_block(top, 0, &model)
+    top + 1
 
 fn tui_eol(s: &String, i: Int, n: Int) -> Int ! alloc
     if i >= n
@@ -156,12 +248,46 @@ fn tui_skip(s: &String, nskip: Int) -> String ! alloc
         else
             tui_skip(&str_slice(s, end + 1, n), nskip - 1)
 
-fn tui_tail(s: &String) -> String ! alloc
-    c = tui_count(&s)
-    if c <= 12
-        s.dup()
-    else
-        tui_skip(&s, c - 12)
+# Cuenta las filas físicas, ignorando secuencias ANSI y bytes de continuación UTF-8.
+fn tui_line_rows(line: &String, width: Int) -> Int ! alloc
+    i = 0
+    cells = 6
+    if tui_starts(&line, &"U ") != 0
+        cells = 0
+    escape = 0
+    while i < str_len(line)
+        c = str_char(line, i)
+        if escape != 0
+            if c == 109
+                escape = 0
+        elsif c == 27
+            escape = 1
+        elsif c < 128
+            cells = cells + 1
+        elsif c >= 192
+            cells = cells + 1
+        i = i + 1
+    rows = 1
+    while cells >= width
+        cells = cells - width
+        rows = rows + 1
+    rows
+
+fn tui_tail(s: &String, limit: Int, width: Int) -> String ! alloc
+    view = s.dup()
+    used = 0
+    i = 0
+    while i < str_len(view)
+        end = tui_eol(&view, i, str_len(view))
+        used = used + tui_line_rows(&str_slice(view, i, end), width)
+        i = end + 1
+    while used > limit
+        end = tui_eol(&view, 0, str_len(view))
+        if end >= str_len(view)
+            return view
+        used = used - tui_line_rows(&str_slice(view, 0, end), width)
+        view = str_slice(view, end + 1, str_len(view))
+    view
 
 fn tui_starts(s: &String, p: &String) -> Int ! alloc
     n = str_len(p)
@@ -173,55 +299,283 @@ fn tui_starts(s: &String, p: &String) -> Int ! alloc
 fn tui_title() -> String ! alloc
     tui_bold() + "default" + tui_reset()
 
-fn tui_user_row(text: &String, side: &String) -> String ! alloc
-    tui_bg() + tui_pad(&("  " + text), 54) + tui_reset() + "  " + side
+fn tui_user_row(text: &String, side: &String, width: Int) -> String ! alloc
+    "    " + tui_blue() + tui_bold() + "❯ " + tui_reset() + text + side
 
-fn tui_tool_row(line: &String, side: &String) -> String ! alloc
-    plain = 6 + str_len(line)
-    head = "    " + tui_cyan() + "┃ " + tui_reset() + line
+fn tui_tool_row(line: &String, side: &String, width: Int) -> String ! alloc
+    visible = str_slice(line, 5, str_len(line))
+    plain = 8 + str_len(visible)
+    head = "    " + tui_cyan() + "↳ " + tui_reset() + tui_dim() + visible + tui_reset()
     gap = 0
-    if plain < 54
-        gap = 54 - plain
-    head + tui_spaces(gap) + "  " + side
+    if plain < width - 1
+        gap = width - 1 - plain
+    head + tui_spaces(gap) + side
 
-fn tui_text_row(line: &String, side: &String) -> String ! alloc
-    tui_pad(&("      " + line), 54) + "  " + side
+fn tui_text_row(line: &String, side: &String, width: Int) -> String ! alloc
+    "      " + tui_green() + "✦ " + tui_reset() + line
 
-fn tui_show_line(line: &String, row: Int) -> String ! alloc
+fn tui_show_line(line: &String, row: Int, width: Int) -> String ! alloc
     side = ""
     if row == 2
         side = tui_title()
-    if tui_starts(&line, &"U ") != 0
-        tui_user_row(&str_slice(line, 2, str_len(line)), &side)
+    if tui_starts(&line, &"? ") != 0
+        "    " + tui_cyan() + tui_bold() + "┃ " + str_slice(line, 2, str_len(line)) + tui_reset()
+    elsif tui_starts(&line, &"permiso: ") != 0
+        "    " + tui_cyan() + tui_bold() + "┃ " + line + tui_reset()
+    elsif tui_starts(&line, &"U ") != 0
+        tui_user_row(&str_slice(line, 2, str_len(line)), &"", width)
     elsif tui_starts(&line, &"tool ") != 0
-        tui_tool_row(&line, &side)
+        tui_tool_row(&line, &"", width)
     else
-        tui_text_row(&line, &side)
+        thought = sk_replace_all(&line, &tui_esc(&"[90m"), &tui_cyan())
+        tui_text_row(&thought, &"", width)
 
-fn tui_paint(s: &String, i: Int, row: Int) -> Int ! io, alloc
+fn tui_paint(s: &String, i: Int, row: Int, width: Int) -> Int ! io, alloc
     n = str_len(s)
     if i >= n
         0
     else
         end = tui_eol(&s, i, n)
         line = str_slice(s, i, end)
-        _w = tui_nl(&tui_show_line(&line, row))
+        _w = tui_nl(&tui_show_line(&line, row, width))
         if end >= n
-            1
+            tui_line_rows(&line, width)
         else
-            1 + tui_paint(&s, end + 1, row + 1)
+            rows = tui_line_rows(&line, width)
+            rows + tui_paint(&s, end + 1, row + rows, width)
 
-fn tui_draw_session() -> Int ! io, alloc
-    _c = tui_clear()
-    _b = tui_nl(&"")
-    view = tui_tail(&ev_tui_log_read())
-    n = tui_paint(&view, 0, 2)
-    _g = tui_nl(&"")
-    tui_prompt_block(n + 3, 1)
+# Segundos enteros de `ms` (Sal no trae división entera en este proyecto).
+fn tui_secs_go(ms: Int, acc: Int) -> Int
+    if ms < 1000
+        acc
+    else
+        tui_secs_go(ms - 1000, acc + 1)
 
-fn tui_read_line_go(acc: &String) -> String ! io, alloc
+fn tui_secs(ms: Int) -> Int
+    tui_secs_go(ms, 0)
+
+# Texto de la fila de espera: "trabajando  7 s" mientras el hijo no manda nada.
+fn tui_wait_text(ms: Int) -> String ! alloc
+    "trabajando  " + int_to_str(tui_secs(ms)) + " s"
+
+fn tui_wait_row(text: &String) -> String ! alloc
+    "      " + tui_dim() + "· " + text + tui_reset()
+
+# Construye el fotograma completo antes de escribirlo, sin borrar primero la pantalla.
+fn tui_frame(transcript: &String, status: &String, model: &String, offset: Int) -> String ! io, alloc
+    size = tui_size()
+    height = tui_dimension(&size, 0)
+    width = tui_dimension(&size, 1)
+    if height < 12
+        height = 12
+    if width < 20
+        width = 20
+    source = tui_history_end(transcript, offset)
+    view = tui_tail(&source, height - 8, width)
+    out = tui_esc(&"[H") + tui_esc(&"[K") + "\n"
+    n = 0
+    i = 0
+    while i < str_len(view)
+        end = tui_eol(&view, i, str_len(view))
+        line = str_slice(&view, i, end)
+        out = out + tui_show_line(&line, n + 2, width) + tui_esc(&"[K") + "\n"
+        n = n + tui_line_rows(&line, width)
+        i = end + 1
+    out = out + tui_esc(&"[J")
+    if str_len(status) > 0
+        out = out + tui_cup(height - 6, 1) + tui_wait_row(status) + tui_esc(&"[K")
+    top = height - 5
+    out = out + tui_cup(top, 1) + tui_bar_row(&"", 0, &"") + tui_esc(&"[K") + "\n"
+    out = out + tui_bar_row(&"  ", 0, &"") + tui_esc(&"[K") + "\n"
+    out = out + tui_agent_row(model, 0, &"") + tui_esc(&"[K") + "\n"
+    out = out + tui_stem_row(0) + tui_esc(&"[K") + "\n"
+    out = out + tui_hint_row(0) + tui_esc(&"[K")
+    out + tui_esc(&"[J") + tui_cup(top + 1, 8) + tui_esc(&"[?25h")
+
+# Omite del final las líneas anteriores al desplazamiento solicitado.
+fn tui_history_end(s: &String, offset: Int) -> String ! alloc
+    count = tui_count(s)
+    keep = count - offset
+    if keep <= 0
+        keep = 1
+    if keep >= count
+        return s.dup()
+    i = 0
+    lines = 0
+    while i < str_len(s)
+        if str_char(s, i) == 10
+            lines = lines + 1
+            if lines >= keep
+                return str_slice(s, 0, i + 1)
+        i = i + 1
+    s.dup()
+
+fn tui_draw_at(sid: &String, status: &String, model: &String, preview: &String, offset: Int) -> Int ! io, alloc
+    transcript = ev_tui_log_read(&sid) + preview
+    picture = tui_frame(&transcript, status, model, offset)
+    _w = Fd.new(1).write_str(&picture)
+    size = tui_size()
+    height = tui_dimension(&size, 0)
+    if height < 12
+        height = 12
+    height - 4
+
+fn tui_draw_session2(sid: &String, status: &String, model: &String) -> Int ! io, alloc
+    tui_draw_at(&sid, status, model, &"", 0)
+
+fn tui_draw_session(sid: &String, model: &String) -> Int ! io, alloc
+    tui_draw_session2(&sid, &"", model)
+
+fn tui_draw_stream(sid: &String, status: &String, model: &String, preview: &String) -> Int ! io, alloc
+    tui_draw_at(&sid, status, model, preview, 0)
+
+# Eco de la línea que se está escribiendo (modo carácter: el terminal no hace eco).
+fn tui_input_echo(row: Int, line: &String, raw: Int) -> Int ! io, alloc
+    if raw == 0
+        0
+    else
+        Fd.new(1).write_str(&(tui_cup(row, 8) + sk_replace_all(line, &char_to_str(31), &"[Image]") + tui_esc(&"[K")))
+
+# Índice donde empieza el último carácter UTF-8 de `s` (borrado con retroceso).
+fn tui_drop_go(s: &String, i: Int) -> Int ! alloc
+    if i <= 0
+        0
+    else
+        b = str_char(s, i)
+        if b >= 128
+            if b < 192
+                tui_drop_go(s, i - 1)
+            else
+                i
+        else
+            i
+
+fn tui_drop_last(s: &String) -> String ! alloc
+    n = str_len(s)
+    if n <= 0
+        ""
+    else
+        str_slice(s, 0, tui_drop_go(s, n - 1))
+
+# Descarta la secuencia de escape que empieza en ESC (flechas, Inicio…): no va a la línea.
+fn tui_skip_esc(k: Int) -> Int ! io, alloc
+    if k <= 0
+        return 0
     buf = bytes_new(1)
-    n = Fd.new(0).read(bytes_ptr(buf), 1)
+    n = Fd.new(0).read_timeout(bytes_ptr(buf), 1, 5)
+    if n <= 0
+        0
+    else
+        b = bytes_get_u8(buf, 0)
+        if b == 91
+            tui_skip_esc(1)
+        elsif b == 79
+            tui_skip_esc(1)
+        elsif b >= 64
+            if b <= 126
+                0
+            else
+                tui_skip_esc(k - 1)
+        else
+            tui_skip_esc(k - 1)
+
+# Reconoce RePág y AvPág; descarta las demás teclas de escape.
+fn tui_escape_key() -> String ! io, alloc
+    buf = bytes_new(1)
+    n = Fd.new(0).read_timeout(bytes_ptr(buf), 1, 20)
+    if n <= 0
+        return ""
+    if bytes_get_u8(buf, 0) != 91
+        _skip = tui_skip_esc(3)
+        return ""
+    n = Fd.new(0).read_timeout(bytes_ptr(buf), 1, 20)
+    if n <= 0
+        return ""
+    c = bytes_get_u8(buf, 0)
+    if c == 53
+        _skip = tui_skip_esc(1)
+        return "up"
+    if c == 54
+        _skip = tui_skip_esc(1)
+        return "down"
+    if c < 64
+        _skip = tui_skip_esc(3)
+    ""
+
+# Un byte de entrada sin esperar ("" si no hay nada): así se ve Ctrl-C durante un turno.
+fn tui_key() -> String ! io, alloc
+    buf = bytes_new(1)
+    n = Fd.new(0).read_timeout(bytes_ptr(buf), 1, 0)
+    if n <= 0
+        ""
+    else
+        String.from_char(bytes_get_u8(buf, 0))
+
+# Primera tecla de una confirmación, sin esperar al Intro en el terminal raw.
+fn tui_read_first_key(raw: Int) -> String ! io, alloc
+    buf = bytes_new(1)
+    n = 0
+    if raw == 0
+        n = Fd.new(0).read(bytes_ptr(buf), 1)
+    else
+        n = Fd.new(0).read_timeout(bytes_ptr(buf), 1, 500)
+        while n < 0
+            n = Fd.new(0).read_timeout(bytes_ptr(buf), 1, 500)
+    if n <= 0
+        ""
+    else
+        String.from_char(bytes_get_u8(buf, 0))
+
+# 1 si el modelo actual (o "vision_model") puede ver imágenes. Se calcula una vez por modelo en
+# lugar de en cada pulsación: parsear la configuración en el bucle de entrada hacía que el hijo
+# del turno terminara con código 1.
+fn tui_vision_ok(model: &String) -> Int ! io, alloc
+    cf = cfg_load()
+    if cfg_vision(&cf, model) != 0
+        return 1
+    if str_len(cfg_top_str(&cf, &"vision_model")) > 0
+        return 1
+    0
+
+# Texto tecleado mientras corría el turno anterior, listo para el siguiente mensaje.
+fn tui_typeahead(left: &List[String]) -> String ! alloc
+    out = ""
+    i = 0
+    while i < left.len()
+        out = out + left.get(i)
+        i = i + 1
+    out
+
+fn tui_read_line_go(sid: &String, acc: &String, row: Int, raw: Int, model: &String, offset: Int, images: &mut List[String], allow_image: Int, vision_ok: Int) -> String ! io, alloc
+    buf = bytes_new(1)
+    current_row = row
+    n = 0
+    if raw == 0
+        n = Fd.new(0).read(bytes_ptr(buf), 1)
+    else
+        size = tui_size()
+        old_width = tui_dimension(&size, 1)
+        n = Fd.new(0).read_timeout(bytes_ptr(buf), 1, 500)
+        while n < 0
+            size = tui_size()
+            height = tui_dimension(&size, 0)
+            width = tui_dimension(&size, 1)
+            if height < 12
+                height = 12
+            if height - 4 != current_row
+                if str_len(ev_tui_log_read(&sid)) == 0
+                    current_row = tui_draw_home(model)
+                else
+                    current_row = tui_draw_at(&sid, &"", model, &"", offset)
+                _echo = tui_input_echo(current_row, acc, raw)
+            elsif width != old_width
+                if str_len(ev_tui_log_read(&sid)) == 0
+                    current_row = tui_draw_home(model)
+                else
+                    current_row = tui_draw_at(&sid, &"", model, &"", offset)
+                _echo = tui_input_echo(current_row, acc, raw)
+            old_width = width
+            n = Fd.new(0).read_timeout(bytes_ptr(buf), 1, 500)
     if n <= 0
         if str_len(acc) <= 0
             tui_eof_marker()
@@ -230,11 +584,147 @@ fn tui_read_line_go(acc: &String) -> String ! io, alloc
     else
         c = bytes_get_u8(buf, 0)
         if c == 10
-            acc.dup()
+            tui_enter_line(&sid, acc, current_row, raw, model, offset, images, allow_image, vision_ok)
         elsif c == 13
-            acc
+            tui_enter_line(&sid, acc, current_row, raw, model, offset, images, allow_image, vision_ok)
+        elsif c == 3
+            tui_ctrlc_marker()
+        elsif c == 4
+            if str_len(acc) <= 0
+                tui_eof_marker()
+            else
+                tui_read_line_go(&sid, acc, current_row, raw, model, offset, images, allow_image, vision_ok)
+        elsif c == 8
+            nacc = tui_delete_input(acc, images)
+            _p = tui_input_echo(current_row, &nacc, raw)
+            tui_read_line_go(&sid, &nacc, current_row, raw, model, offset, images, allow_image, vision_ok)
+        elsif c == 127
+            nacc = tui_delete_input(acc, images)
+            _p = tui_input_echo(current_row, &nacc, raw)
+            tui_read_line_go(&sid, &nacc, current_row, raw, model, offset, images, allow_image, vision_ok)
+        elsif c == 22
+            if allow_image != 0
+                capture = clipboard_capture()
+                if str_len(capture.path) > 0
+                    _a = images.push(capture.path.dup())
+                    nacc = acc + char_to_str(31)
+                    if vision_ok == 0
+                        current_row = tui_draw_session2(&sid, &"Imagen añadida; configura visión o vision_model para que el modelo pueda verla", model)
+                    _p = tui_input_echo(current_row, &nacc, raw)
+                    return tui_read_line_go(&sid, &nacc, current_row, raw, model, offset, images, allow_image, vision_ok)
+                current_row = tui_draw_session2(&sid, &capture.error, model)
+                _p = tui_input_echo(current_row, acc, raw)
+            tui_read_line_go(&sid, acc, current_row, raw, model, offset, images, allow_image, vision_ok)
+        elsif c == 27
+            key = tui_escape_key()
+            next = offset
+            count = tui_count(&ev_tui_log_read(&sid))
+            if str_eq(key, "up") != 0
+                next = offset + 5
+                if next >= count
+                    next = count - 1
+                if next < 0
+                    next = 0
+            elsif str_eq(key, "down") != 0
+                next = offset - 5
+                if next < 0
+                    next = 0
+            if next != offset
+                new_row = tui_draw_at(&sid, &"", model, &"", next)
+                _p = tui_input_echo(new_row, acc, raw)
+                return tui_read_line_go(&sid, acc, new_row, raw, model, next, images, allow_image, vision_ok)
+            tui_read_line_go(&sid, acc, current_row, raw, model, offset, images, allow_image, vision_ok)
+        elsif c < 32
+            tui_read_line_go(&sid, acc, current_row, raw, model, offset, images, allow_image, vision_ok)
         else
-            tui_read_line_go(&(acc + char_to_str(c)))
+            nacc = acc + char_to_str(c)
+            _p = tui_input_echo(row, &nacc, raw)
+            tui_read_line_go(&sid, &nacc, current_row, raw, model, offset, images, allow_image, vision_ok)
+
+# Una respuesta tecleada durante la espera puede incluir ya Intro.
+# Ruta de imagen escrita o pegada en la línea (con o sin comillas), o "" si no lo es.
+fn tui_image_path(acc: &String) -> String ! alloc
+    t = sk_trim(acc)
+    n = str_len(&t)
+    if n < 3
+        return ""
+    first = str_char(&t, 0)
+    last = str_char(&t, n - 1)
+    if first == 34
+        if last == 34
+            t = sk_trim(&str_slice(&t, 1, n - 1))
+    elsif first == 39
+        if last == 39
+            t = sk_trim(&str_slice(&t, 1, n - 1))
+    if sk_contains(&t, &char_to_str(31)) != 0
+        return ""
+    if sk_contains(&t, &char_to_str(10)) != 0
+        return ""
+    if img_is_image(&t) == 0
+        return ""
+    t
+
+# Intro: si la línea es la ruta de una imagen —pegada desde un gestor de ficheros o escrita a
+# mano—, se adjunta como imagen en vez de enviarse como texto. Es la alternativa a Ctrl-V en
+# sistemas sin portapapeles gráfico (soso).
+fn tui_enter_line(sid: &String, acc: &String, row: Int, raw: Int, model: &String, offset: Int, images: &mut List[String], allow_image: Int, vision_ok: Int) -> String ! io, alloc
+    if allow_image != 0
+        if images.len() == 0
+            t = tui_image_path(acc)
+            if str_len(&t) > 0
+                p = path_abs(&t)
+                if fsx_is_file(&p) == 0
+                    r = tui_draw_session2(sid, &("Imagen no encontrada: " + t), model)
+                    return tui_read_line_go(sid, acc, r, raw, model, offset, images, allow_image, vision_ok)
+                if fsx_size(&p) > 5242880
+                    r = tui_draw_session2(sid, &"La imagen supera el límite de 5 MB", model)
+                    return tui_read_line_go(sid, acc, r, raw, model, offset, images, allow_image, vision_ok)
+                _a = images.push(p)
+                return char_to_str(31)
+    acc.dup()
+
+# Un marcador interno representa una imagen completa; el retroceso elimina el adjunto.
+fn tui_delete_input(acc: &String, images: &mut List[String]) -> String ! io, alloc
+    n = str_len(acc)
+    if n > 0
+        if str_char(acc, n - 1) == 31
+            if images.len() > 0
+                path = images.pop()
+                _r = clipboard_remove(&path)
+            return str_slice(acc, 0, n - 1)
+    tui_drop_last(acc)
+
+fn tui_read_prefilled(sid: &String, pending: &String, row: Int, raw: Int, model: &String) -> String ! io, alloc
+    end = sk_index_of(pending, &char_to_str(10))
+    cr = sk_index_of(pending, &char_to_str(13))
+    if end < 0
+        end = cr
+    elsif cr >= 0
+        if cr < end
+            end = cr
+    if end >= 0
+        return str_slice(pending, 0, end)
+    _e = tui_input_echo(row, pending, raw)
+    none = List.new[String]()
+    tui_read_line_go(&sid, pending, row, raw, model, 0, &mut none, 0, 1)
+
+# Siguiente mensaje con el texto tecleado durante el turno anterior: si ya trae Intro se envía
+# tal cual (una respuesta "exit" escrita mientras el agente trabajaba sigue valiendo); si no, se
+# continúa editando.
+fn tui_read_typeahead(sid: &String, pending: &String, row: Int, raw: Int, model: &String, images: &mut List[String], vision_ok: Int) -> String ! io, alloc
+    if str_len(pending) <= 0
+        return tui_read_line_go(&sid, &"", row, raw, model, 0, images, 1, vision_ok)
+    end = sk_index_of(pending, &char_to_str(10))
+    cr = sk_index_of(pending, &char_to_str(13))
+    if end < 0
+        end = cr
+    elsif cr >= 0
+        if cr < end
+            end = cr
+    if end >= 0
+        return str_slice(pending, 0, end)
+    _e = tui_input_echo(row, pending, raw)
+    tui_read_line_go(&sid, pending, row, raw, model, 0, images, 1, vision_ok)
 
 fn tui_is_eof(line: &String) -> Int ! alloc
     str_eq(line, tui_eof_marker())
@@ -251,26 +741,51 @@ fn tui_is_quit(line: &String) -> Int ! alloc
     else
         0
 
-# Ejecutable que corre cada turno: argv(0) o /bin/supercoder.
+# Busca `name` dentro de una lista de carpetas separadas por ":" (estilo PATH).
+fn tui_bin_in_dirs(name: &String, dirs: &String) -> String ! io, alloc
+    i = sk_index_of(dirs, &":")
+    if i < 0
+        p = dirs + "/" + name
+        if fsx_is_file(&p) != 0
+            return p
+        ""
+    else
+        p = str_slice(dirs, 0, i) + "/" + name
+        if fsx_is_file(&p) != 0
+            return p
+        tui_bin_in_dirs(&name, &str_slice(dirs, i + 1, str_len(dirs)))
+
+# Ejecutable que corre cada turno: argv(0) si trae ruta; si se lanzó desde el PATH (sin "/"),
+# se busca ahí y en las carpetas habituales (soso lo instala en /bin).
 fn tui_binary() -> String ! io, alloc
     a0 = argv(0)
     if sk_contains(&a0, &"/") != 0
         return a0
+    p = tui_bin_in_dirs(&a0, &getenv(&"PATH"))
+    if str_len(p) > 0
+        return p
+    q = tui_bin_in_dirs(&a0, &"/usr/local/bin:/usr/bin:/bin")
+    if str_len(q) > 0
+        return q
     "/bin/supercoder"
 
 # Línea de registro para un evento de herramienta en marcha (también dentro de subagentes).
-fn tui_log_tool(d: &JsonDoc, ev: Int) -> Int ! io, alloc
+fn tui_log_tool(sid: &String, d: &JsonDoc, ev: Int) -> Int ! io, alloc
     if str_eq(json_get_str(&d, ev, &"type"), "tool_use") != 0
         part = json_get(&d, ev, &"part")
         if str_eq(json_get_str(&d, json_get(&d, part, &"state"), &"status"), "running") != 0
-            return ev_tui_log_add(&("tool " + json_get_str(&d, part, &"tool")))
+            return ev_tui_log_add(&sid, &("tool " + json_get_str(&d, part, &"tool")))
     0
 
 # Pregunta si se concede un permiso: devuelve la respuesta para el hijo.
-fn tui_ask_permission(title: &String) -> String ! io, alloc
-    _l = ev_tui_log_add(&("permiso: " + title + "  [s]i / [a]siempre / [N]o"))
-    _d = tui_draw_session()
-    ans = sk_lower(&sk_trim(&tui_read_line_go(&"")))
+fn tui_ask_permission(sid: &String, title: &String, model: &String, raw: Int, pending: &String) -> String ! io, alloc
+    _l = ev_tui_log_add(&sid, &("permiso: " + title + "  Pulsa S: permitir · A: siempre · N: denegar"))
+    row = tui_draw_session(&sid, &model)
+    ans = ""
+    if str_len(pending) > 0
+        ans = sk_lower(&str_slice(pending, 0, 1))
+    else
+        ans = sk_lower(&tui_read_first_key(raw))
     if str_eq(ans, "s") != 0
         return "once"
     if str_eq(ans, "si") != 0
@@ -281,78 +796,285 @@ fn tui_ask_permission(title: &String) -> String ! io, alloc
         return "always"
     "reject"
 
+# Muestra la pregunta y sus opciones; una tecla numérica elige al instante, texto libre usa Intro.
+fn tui_ask_question(sid: &String, question: &String, options: &JsonDoc, node: Int, model: &String, raw: Int, pending: &String) -> String ! io, alloc
+    _q = ev_tui_log_add(&sid, &("? " + question))
+    child = json_first(options, node)
+    i = 1
+    while child >= 0
+        _o = ev_tui_log_add(&sid, &("?   " + int_to_str(i) + ". " + json_str(options, child)))
+        i = i + 1
+        child = json_next(options, child)
+    _h = ev_tui_log_add(&sid, &"? Pulsa el número de una opción o escribe una respuesta y pulsa Intro")
+    row = tui_draw_session(&sid, model)
+    first = ""
+    answer = ""
+    read_done = 0
+    if str_len(pending) > 0
+        first = str_slice(pending, 0, 1)
+    else
+        if raw == 0
+            answer = tui_read_prefilled(&sid, pending, row, raw, model)
+            read_done = 1
+        else
+            first = tui_read_first_key(raw)
+    if sk_is_int(&first) != 0
+        choice = sk_parse_int(&first)
+        child = json_first(options, node)
+        i = 1
+        while child >= 0
+            if i == choice
+                answer = json_str(options, child).dup()
+                _a = ev_tui_log_add(&sid, &("U " + answer))
+                return answer
+            i = i + 1
+            child = json_next(options, child)
+    if read_done == 0
+        if str_len(pending) > 0
+            answer = tui_read_prefilled(&sid, pending, row, raw, model)
+        elsif str_len(first) > 0
+            _e = tui_input_echo(row, &first, raw)
+            none = List.new[String]()
+            answer = tui_read_line_go(&sid, &first, row, raw, model, 0, &mut none, 0, 1)
+        else
+            answer = tui_read_prefilled(&sid, pending, row, raw, model)
+    if tui_is_eof(&answer) != 0
+        return char_to_str(4)
+    if tui_is_ctrlc(&answer) != 0
+        return char_to_str(4)
+    clean = sk_trim(&answer)
+    if sk_is_int(&clean) != 0
+        choice = sk_parse_int(&clean)
+        child = json_first(options, node)
+        i = 1
+        while child >= 0
+            if i == choice
+                answer = json_str(options, child).dup()
+            i = i + 1
+            child = json_next(options, child)
+    _a = ev_tui_log_add(&sid, &("U " + answer))
+    answer
+
 # Un turno: lanza `supercoder run` como proceso hijo y vuelca sus eventos en el registro.
-fn tui_turn(line: String, cont: Int) -> Int ! io, alloc
+fn tui_turn(sid: &String, line: String, cont: Int, model: &String, rw: Int, images: &List[String], typed: &mut List[String]) -> Int ! io, alloc
     args = sk_sl_new()
     _a1 = sk_sl_push(&mut args, "run")
     _a2 = sk_sl_push(&mut args, "--format")
     _a3 = sk_sl_push(&mut args, "json")
     _a4 = sk_sl_push(&mut args, "--session")
-    _a5 = sk_sl_push(&mut args, "default")
+    _a5 = sk_sl_push(&mut args, sid.dup())
     _a6 = sk_sl_push(&mut args, "--interactive")
+    _am = sk_sl_push(&mut args, "--model")
+    _av = sk_sl_push(&mut args, model.dup())
     # El hijo habla JSON por stdout; los informes OSC 7501 van por su stderr (nuestro terminal).
     _a6b = sk_sl_push(&mut args, "--osc7501")
     if cont != 0
         _a7 = sk_sl_push(&mut args, "--continue")
+    i = 0
+    while i < images.len()
+        _f = sk_sl_push(&mut args, "--file")
+        _p = sk_sl_push(&mut args, images.get(i).dup())
+        i = i + 1
     _a8 = sk_sl_push(&mut args, "--")
     _a9 = sk_sl_push(&mut args, line)
-    h = child_start(&tui_binary(), &args)
+    bin = tui_binary()
+    h = child_start(&bin, &args)
     if h < 0
-        return ev_tui_log_add(&("error: no se pudo lanzar " + tui_binary()))
+        _e = ev_tui_log_add(&sid, &("error: no se pudo lanzar " + bin))
+        return 0
+    t0 = now_ms()
+    seen = 0 - 1
+    stream_text = ""
+    cancel = 0
+    pending = ""
     go = 1
     while go != 0
-        raw = child_read_line(h, 7200000)
-        if str_eq(raw, char_to_str(4)) != 0
+        # Ctrl-C durante el turno: el primero lo cancela (y pide confirmación para salir).
+        key = ""
+        if rw != 0
+            key = tui_key()
+        if str_eq(key, char_to_str(3)) != 0
+            if cancel == 0
+                cancel = 1
+                _k = child_kill(h)
+                _c = ev_tui_log_add(&sid, &"· turno cancelado")
+            0
+        else
+            pending = pending + key
+            0
+        # Espera corta: si el hijo calla, repintamos el estado para que se vea que sigue en marcha.
+        raw = child_read_line_idle(h, 700)
+        if str_eq(raw, "") != 0
+            secs = tui_secs(now_ms() - t0)
+            if secs == seen
+                0
+            else
+                seen = secs
+                tui_draw_stream(&sid, &tui_wait_text(now_ms() - t0), &model, &stream_text)
+        elsif str_eq(raw, char_to_str(4)) != 0
             go = 0
         else
+            seen = tui_secs(now_ms() - t0)
             d = json_parse(&raw)
             if json_ok(&d) != 0
                 r = json_root(&d)
                 t = json_get_str(&d, r, &"type")
                 if str_eq(t, "text") != 0
-                    _t = ev_tui_log_add(&json_get_str(&d, json_get(&d, r, &"part"), &"text"))
+                    _t = ev_tui_log_add(&sid, &ev_think_style(&json_get_str(&d, json_get(&d, r, &"part"), &"text")))
+                    stream_text = ""
+                elsif str_eq(t, "text_delta") != 0
+                    piece = json_get_str(&d, json_get(&d, r, &"part"), &"text")
+                    stream_text = stream_text + piece
                 elsif str_eq(t, "status") != 0
-                    _st = ev_tui_log_add(&("· " + json_get_str(&d, json_get(&d, r, &"part"), &"text")))
+                    _st = ev_tui_log_add(&sid, &("· " + json_get_str(&d, json_get(&d, r, &"part"), &"text")))
                 elsif str_eq(t, "error") != 0
                     em = json_path(&d, r, &"error.data.message")
                     if em >= 0
-                        _e = ev_tui_log_add(&("error: " + json_str(&d, em)))
+                        _e = ev_tui_log_add(&sid, &("error: " + json_str(&d, em)))
                 elsif str_eq(t, "tool_use") != 0
-                    _u = tui_log_tool(&d, r)
+                    _u = tui_log_tool(&sid, &d, r)
                 elsif str_eq(t, "subagent") != 0
                     inner = json_path(&d, r, &"part.event")
                     if inner >= 0
-                        _s = tui_log_tool(&d, inner)
+                        _s = tui_log_tool(&sid, &d, inner)
+                elsif str_eq(t, "question_request") != 0
+                    pt = json_get(&d, r, &"part")
+                    answer = tui_ask_question(&sid, &json_get_str(&d, pt, &"question"), &d, json_get(&d, pt, &"options"), &model, rw, &pending)
+                    pending = ""
+                    msg = jb_obj(&(jb_kv(&"type", &json_quote(&"question_reply")) + "," + jb_kv(&"id", &json_quote(&json_get_str(&d, pt, &"id"))) + "," + jb_kv(&"answer", &json_quote(&answer))))
+                    _w = child_write_line(h, &msg)
                 elsif str_eq(t, "permission_request") != 0
                     pt = json_get(&d, r, &"part")
-                    reply = tui_ask_permission(&json_get_str(&d, pt, &"title"))
+                    reply = tui_ask_permission(&sid, &json_get_str(&d, pt, &"title"), &model, rw, &pending)
+                    pending = ""
                     msg = jb_obj(&(jb_kv(&"type", &json_quote(&"permission_reply")) + "," + jb_kv(&"id", &json_quote(&json_get_str(&d, pt, &"id"))) + "," + jb_kv(&"reply", &json_quote(&reply))))
                     _w = child_write_line(h, &msg)
                 if str_eq(t, "permission_request") == 0
-                    _dr = tui_draw_session()
-    child_finish(h)
-
-fn tui_loop_go(turn: Int) -> Int ! io, alloc
-    if turn <= 0
-        _h = tui_draw_home()
+                    _dr = tui_draw_stream(&sid, &tui_wait_text(now_ms() - t0), &model, &ev_think_style(&stream_text))
+                0
+            else
+                0
+    code = child_finish(h)
+    # Lo tecleado durante el turno pasa al siguiente mensaje en vez de perderse.
+    if str_len(pending) > 0
+        _t = typed.push(pending.dup())
+    if cancel != 0
+        1
     else
-        _s = tui_draw_session()
-    line = tui_read_line_go(&"")
-    if tui_is_eof(&line) != 0
-        tui_leave()
-    elsif tui_is_quit(&line) != 0
-        tui_leave()
-    elsif str_len(line) <= 0
-        tui_loop_go(turn)
-    else
-        _u = ev_tui_log_add(&("U " + line))
-        cont = 0
-        if turn > 0
-            cont = 1
-        _r = tui_turn(line, cont)
-        tui_loop_go(turn + 1)
+        if code != 0
+            _eo = ev_tui_log_add(&sid, &("error: " + bin + " terminó con código " + int_to_str(code)))
+        0
 
+fn tui_models_text(model: &String) -> String ! io, alloc
+    cf = cfg_load()
+    d = cfg_doc(&cf)
+    models = json_get(&d, json_root(&d), &"models")
+    if models < 0
+        return "modelos: configura `models` en supercoder.json; también puedes usar /model ID"
+    out = "modelos disponibles:"
+    child = json_first(&d, models)
+    while child >= 0
+        key = json_key(&d, child)
+        mark = "  "
+        if str_eq(key, model) != 0
+            mark = "* "
+        out = out + char_to_str(10) + mark + key
+        child = json_next(&d, child)
+    out
+
+fn tui_model_arg(line: &String) -> String ! alloc
+    if str_len(line) <= 7
+        ""
+    else
+        sk_trim(&str_slice(line, 7, str_len(line)))
+
+fn tui_loop_go(sid: &String, turn: Int, model: String, rw: Int, armed: Int, vision_ok: Int, typed: &String) -> Int ! io, alloc
+    current_turn = turn
+    current_model = model
+    current_armed = armed
+    pending = typed.dup()
+    running = 1
+    while running != 0
+        row = 0
+        if current_turn <= 0
+            if str_len(ev_tui_log_read(&sid)) == 0
+                row = tui_draw_home(&current_model)
+            else
+                row = tui_draw_session(&sid, &current_model)
+        else
+            row = tui_draw_session(&sid, &current_model)
+        images = List.new[String]()
+        line = tui_read_typeahead(&sid, &pending, row, rw, &current_model, &mut images, vision_ok)
+        pending = ""
+        command_line = line.dup()
+        if images.len() > 0
+            command_line = ""
+        if tui_is_eof(&line) != 0
+            _clean = clipboard_cleanup(&mut images)
+            _log = ev_tui_log_remove(&sid)
+            _leave = tui_leave(rw)
+            running = 0
+        elsif tui_is_ctrlc(&line) != 0
+            _clean = clipboard_cleanup(&mut images)
+            if current_armed != 0
+                _log = ev_tui_log_remove(&sid)
+                _leave = tui_leave(rw)
+                running = 0
+            else
+                _d = tui_draw_session2(&sid, &tui_ctrlc_hint(), &current_model)
+                current_armed = 1
+        elsif tui_is_quit(&command_line) != 0
+            _clean = clipboard_cleanup(&mut images)
+            _log = ev_tui_log_remove(&sid)
+            _leave = tui_leave(rw)
+            running = 0
+        elsif str_eq(command_line, "/models") != 0
+            _m = ev_tui_log_add(&sid, &tui_models_text(&current_model))
+            _d = tui_draw_session(&sid, &current_model)
+            current_armed = 0
+        elsif tui_starts(&command_line, &"/model ") != 0
+            selected = tui_model_arg(&line)
+            if str_len(selected) <= 0
+                _m = ev_tui_log_add(&sid, &tui_models_text(&current_model))
+                _d = tui_draw_session(&sid, &current_model)
+            else
+                _m = ev_tui_log_add(&sid, &("· modelo cambiado a " + selected))
+                current_model = selected
+                vision_ok = tui_vision_ok(&current_model)
+            current_armed = 0
+        elsif str_eq(command_line, "/model") != 0
+            _m = ev_tui_log_add(&sid, &tui_models_text(&current_model))
+            _d = tui_draw_session(&sid, &current_model)
+            current_armed = 0
+        elsif str_len(line) <= 0
+            current_armed = 0
+        else
+            visible = sk_replace_all(&line, &char_to_str(31), &"[Image]")
+            _u = ev_tui_log_add(&sid, &("U " + visible))
+            # Pinta ya el mensaje del usuario y el estado de espera, sin aguardar al primer evento.
+            _d = tui_draw_session2(&sid, &tui_wait_text(0), &current_model)
+            cont = 0
+            if current_turn > 0
+                cont = 1
+            buffered = List.new[String]()
+            st = tui_turn(&sid, visible, cont, &current_model, rw, &images, &mut buffered)
+            _clean = clipboard_cleanup(&mut images)
+            current_turn = current_turn + 1
+            if st != 0
+                _d2 = tui_draw_session2(&sid, &tui_ctrlc_hint(), &current_model)
+                current_armed = 1
+            else
+                pending = tui_typeahead(&buffered)
+                current_armed = 0
+
+    0
 fn tui_loop() -> Int ! io, alloc
-    _z = ev_tui_log_reset()
+    sid = "tui-" + int_to_str(getrandom_u64()) + "-" + int_to_str(now_ms())
+    _z = ev_tui_log_reset(&sid)
     _e = tui_enter()
-    tui_loop_go(0)
+    rw = tui_tty_on()
+    _o = osc_idle_tty()
+    cf = cfg_load()
+    model = cfg_model_for(&cf, &"")
+    vision = tui_vision_ok(&model)
+    tui_loop_go(&sid, 0, model, rw, 0, vision, &"")

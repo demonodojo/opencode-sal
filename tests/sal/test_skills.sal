@@ -48,9 +48,15 @@ fn main() -> Int ! io, alloc
     f = f + ck_int(tr_failed(&r), 1, 30)
     f = f + ck_contains(&tr_output(&r), &"Available skills:", 31)
 
+    roots = sk_sl_new()
+    _roots = skills_add_roots(&mut roots, &"/project")
+    f = f + ck_str(sk_sl_get(&roots, 0), &"/project/.agents/skills", 35)
+    f = f + ck_str(sk_sl_get(&roots, 1), &"/project/.supercoder/skills", 36)
+
     # los ficheros de un skill del usuario no cuentan como directorio externo
     home = home_dir()
     if str_len(home) > 0
         f = f + ck_int(skills_path_ok(&(home + "/.claude/skills/x/SKILL.md")), 1, 40)
+        f = f + ck_int(skills_path_ok(&(home + "/.agents/skills/x/SKILL.md")), 1, 42)
     f = f + ck_int(skills_path_ok(&"/etc/passwd"), 0, 41)
     f

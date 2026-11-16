@@ -35,8 +35,11 @@ fn call_args(c: &Call) -> String ! alloc
     c.args.dup()
 
 fn call_json(c: &Call) -> String ! alloc
-    fn_part = jb_obj(&(jb_kv(&"name", &json_quote(&call_name(c))) + "," + jb_kv(&"arguments", &json_quote(&call_args(c)))))
-    jb_obj(&(jb_kv(&"id", &json_quote(&call_id(c))) + "," + jb_kv(&"type", &json_quote(&"function")) + "," + jb_kv(&"function", &fn_part)))
+    c.to_json()
+
+method Call.to_json(&self) -> String ! alloc
+    fn_part = jb_obj(&(jb_kv(&"name", &json_quote(&self.name)) + "," + jb_kv(&"arguments", &json_quote(&self.args))))
+    jb_obj(&(jb_kv(&"id", &json_quote(&self.id)) + "," + jb_kv(&"type", &json_quote(&"function")) + "," + jb_kv(&"function", &fn_part)))
 
 # Mensaje del asistente. Sin llamadas (lista vacía) lleva solo texto.
 fn msg_assistant(text: &String, calls: &List[Call]) -> String ! alloc
@@ -47,6 +50,6 @@ fn msg_assistant(text: &String, calls: &List[Call]) -> String ! alloc
     items = sk_sl_new()
     i = 0
     while i < n
-        x = sk_sl_push(&mut items, call_json(calls.get(i)))
+        x = sk_sl_push(&mut items, calls.get(i).to_json())
         i = i + 1
     jb_obj(&(base + "," + jb_kv(&"tool_calls", &jb_arr(&jb_join(&items)))))

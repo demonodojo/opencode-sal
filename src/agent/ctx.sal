@@ -2,6 +2,20 @@
 
 import "src/config.sal"
 
+struct TokenUsage
+    input: Int
+    output: Int
+
+method TokenUsage.add(&mut self, input: Int, output: Int) -> Int
+    self.input = self.input + input
+    self.output = self.output + output
+    0
+
+struct PermissionState
+    allow: String
+    grants: String
+    agent_rules: String
+
 struct Ctx
     cfg: Cfg
     model: String
@@ -10,8 +24,7 @@ struct Ctx
     out: Int
     max_turns: Int
     agent: String
-    in_tokens: Int
-    out_tokens: Int
+    usage: TokenUsage
     interactive: Int
     yes: Int
     shell: String
@@ -21,17 +34,15 @@ struct Ctx
     step: Int
     vision: Int
     depth: Int
-    allow: String
+    permissions: PermissionState
     todos: String
     turns: Int
     call: String
-    grants: String
-    agent_perm: String
     pending: String
     osc: Int
 
 fn ctx_new() -> Ctx ! alloc
-    Ctx(Cfg(""), d"", List.new[String](), d"", 0, 0, d"", 0, 0, 0, 0, d"", d"", d"", 0, 0, 0, 0, d"", d"", 0, d"", d"", d"", d"", 0)
+    Ctx(Cfg(""), d"", List.new[String](), d"", 0, 0, d"", TokenUsage(0, 0), 0, 0, d"", d"", d"", 0, 0, 0, 0, PermissionState(d"", d"", d""), d"", 0, d"", d"", 0)
 
 fn ctx_cfg(c: &Ctx) -> &Cfg
     &c.cfg
@@ -88,15 +99,13 @@ fn ctx_set_agent(c: &mut Ctx, v: &String) -> Int ! alloc
     0
 
 fn ctx_in_tokens(c: &Ctx) -> Int
-    c.in_tokens
+    c.usage.input
 
 fn ctx_out_tokens(c: &Ctx) -> Int
-    c.out_tokens
+    c.usage.output
 
 fn ctx_add_tokens(c: &mut Ctx, i: Int, o: Int) -> Int
-    c.in_tokens = c.in_tokens + i
-    c.out_tokens = c.out_tokens + o
-    0
+    c.usage.add(i, o)
 
 # 1 si hay un cliente que responde a las peticiones de permiso por stdin.
 fn ctx_interactive(c: &Ctx) -> Int
@@ -167,10 +176,10 @@ fn ctx_set_depth(c: &mut Ctx, v: Int) -> Int
 
 # Lista de herramientas permitidas para el agente ("" = todas), separadas por comas.
 fn ctx_allow(c: &Ctx) -> String ! alloc
-    c.allow.dup()
+    c.permissions.allow.dup()
 
 fn ctx_set_allow(c: &mut Ctx, v: &String) -> Int ! alloc
-    c.allow = v.dup()
+    c.permissions.allow = v.dup()
     0
 
 # Estado de las listas de tareas (array JSON como texto).
@@ -199,18 +208,18 @@ fn ctx_set_call(c: &mut Ctx, v: &String) -> Int ! alloc
 
 # Permisos concedidos con "always": líneas "tipo<TAB>patrón".
 fn ctx_grants(c: &Ctx) -> String ! alloc
-    c.grants.dup()
+    c.permissions.grants.dup()
 
 fn ctx_set_grants(c: &mut Ctx, v: &String) -> Int ! alloc
-    c.grants = v.dup()
+    c.permissions.grants = v.dup()
     0
 
 # Reglas de permisos propias del agente: objeto JSON como texto ("" = ninguna).
 fn ctx_agent_perm(c: &Ctx) -> String ! alloc
-    c.agent_perm.dup()
+    c.permissions.agent_rules.dup()
 
 fn ctx_set_agent_perm(c: &mut Ctx, v: &String) -> Int ! alloc
-    c.agent_perm = v.dup()
+    c.permissions.agent_rules = v.dup()
     0
 
 # 1 si se emiten informes OSC 7501 también con --format json (--osc7501; lo usa la TUI).

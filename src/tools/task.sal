@@ -13,6 +13,7 @@ import "src/agents.sal"
 import "src/config.sal"
 import "src/events.sal"
 import "src/perm.sal"
+import "src/tools/question.sal"
 import "src/tools/common.sal"
 
 fn task_max_turns() -> Int
@@ -36,9 +37,10 @@ fn task_reply_word(r: Int) -> String
     "reject"
 
 fn tool_task(c: &mut Ctx, d: &JsonDoc, a: Int) -> ToolResult ! io, alloc
-    desc = arg_str(d, a, &"description", "subagent task")
-    prompt = arg_str(d, a, &"prompt,task,instructions", "")
-    kind = sk_trim(&arg_str(d, a, &"subagent_type,agent", "general"))
+    args = ToolArgs(d, a)
+    desc = args.string(&"description", "subagent task")
+    prompt = args.string(&"prompt,task,instructions", "")
+    kind = sk_trim(&args.string(&"subagent_type,agent", "general"))
     if ctx_depth(c) >= 1
         return tr_err(&"Subagents cannot launch other subagents")
     if str_len(sk_trim(&prompt)) == 0
@@ -108,7 +110,13 @@ fn tool_task(c: &mut Ctx, d: &JsonDoc, a: Int) -> ToolResult ! io, alloc
                         tp = json_path(&ed, er, &"part.state.status")
                         if tp >= 0
                             if str_eq(json_str(&ed, tp), "running") != 0
-                                x = ev_tui_log_add(&("tool " + json_get_str(&ed, json_get(&ed, er, &"part"), &"tool")))
+                                x = ev_tui_log_add(&ctx_session(c), &("tool " + json_get_str(&ed, json_get(&ed, er, &"part"), &"tool")))
+                elsif str_eq(et, "question_request") != 0
+                    qp = json_get(&ed, er, &"part")
+                    options = json_get(&ed, qp, &"options")
+                    answer = question_ask(c, &json_get_str(&ed, qp, &"question"), &json_dump(&ed, options))
+                    msg = jb_obj(&(jb_kv(&"type", &json_quote(&"question_reply")) + "," + jb_kv(&"id", &json_quote(&json_get_str(&ed, qp, &"id"))) + "," + jb_kv(&"answer", &json_quote(&answer))))
+                    x = child_write_line(h, &msg)
                 elsif str_eq(et, "permission_request") != 0
                     pp = json_get(&ed, er, &"part")
                     reply = perm_ask(c, &json_get_str(&ed, pp, &"tool"), &json_get_str(&ed, pp, &"title"), &json_dump(&ed, json_get(&ed, pp, &"input")))

@@ -9,9 +9,15 @@ cp -f "$root/tests/fixtures/oc-fixture.txt" /tmp/oc-fixture.txt
 python3 "$root/tests/mock_llm.py" 7422 "$root/tests/guiones/read_then_stop.json" &
 pid=$!
 sleep 0.4
-out=$(printf 'lee /tmp/oc-fixture.txt\ns\nexit\n' | "$root/out/linux/bin/supercoder")
+mkdir -p "$root/tests/out/tui-work"
+out=$(cd "$root/tests/out/tui-work" && printf 'lee /tmp/oc-fixture.txt\ns\nexit\n' | "$root/out/linux/bin/supercoder")
 kill "$pid" 2>/dev/null || true
 echo "$out" | grep -q 'permiso: external_directory'
 echo "$out" | grep -q 'tool read'
 echo "$out" | grep -q 'terminado'
 echo "linux TUI session + mock E2E OK"
+
+python3 "$root/tests/test_tui_question.py" "$root/out/linux/bin/supercoder"
+python3 "$root/tests/test_tui_terminal.py" "$root/out/linux/bin/supercoder"
+python3 "$root/tests/test_tui_clipboard.py" "$root/out/linux/bin/supercoder"
+python3 "$root/tests/test_tui_path.py" "$root/out/linux/bin/supercoder"

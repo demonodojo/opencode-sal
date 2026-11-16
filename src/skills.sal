@@ -3,8 +3,8 @@
 #
 # Dónde se buscan, de mayor a menor prioridad (la primera con un nombre gana):
 #   1. el directorio de trabajo y sus ascendientes hasta la raíz del repositorio (.git):
-#      .supercoder/skills, .opencode/skills, .claude/skills
-#   2. el directorio del usuario: ~/.supercoder/skills, ~/.config/opencode/skills, ~/.claude/skills
+#      .agents/skills, .supercoder/skills, .opencode/skills, .claude/skills
+#   2. el directorio del usuario: ~/.agents/skills, ~/.supercoder/skills, ~/.config/opencode/skills, ~/.claude/skills
 # El prompt lista los nombres con su descripción y la herramienta `skill` carga el cuerpo.
 # El usuario también puede invocar un skill escribiendo `/nombre argumentos` al principio del prompt.
 
@@ -23,6 +23,7 @@ fn skills_prompt_budget() -> Int
     6000
 
 fn skills_add_roots(out: &mut List[String], dir: &String) -> Int ! alloc
+    x = sk_sl_push(out, dir.dup() + "/.agents/skills")
     x = sk_sl_push(out, dir.dup() + "/.supercoder/skills")
     x = sk_sl_push(out, dir.dup() + "/.opencode/skills")
     x = sk_sl_push(out, dir.dup() + "/.claude/skills")
@@ -47,6 +48,7 @@ fn skills_dirs() -> List[String] ! io, alloc
             dir = path_dirname(&dir)
     home = home_dir()
     if str_len(home) > 0
+        y = sk_sl_push(&mut sl, home + "/.agents/skills")
         y = sk_sl_push(&mut sl, home + "/.supercoder/skills")
         y = sk_sl_push(&mut sl, home + "/.config/opencode/skills")
         y = sk_sl_push(&mut sl, home + "/.claude/skills")

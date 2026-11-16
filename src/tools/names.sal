@@ -9,6 +9,8 @@ fn tools_base_names() -> String
 # Nombre canónico (acepta alias frecuentes de otros agentes y mayúsculas).
 fn tool_canon(name: &String) -> String ! alloc
     n = sk_lower(&sk_trim(&name))
+    if str_eq(n, "ask_user") != 0
+        return "question"
     if str_eq(n, "read_file") != 0
         return "read"
     if str_eq(n, "view") != 0
@@ -45,4 +47,4 @@ fn tool_canon(name: &String) -> String ! alloc
 
 # Todas las herramientas registradas (las de fases posteriores se añaden aquí).
 fn tools_all_names() -> String ! alloc
-    tools_base_names() + ",todowrite,todoread,skill,task"
+    tools_base_names() + ",todowrite,todoread,skill,task,question"

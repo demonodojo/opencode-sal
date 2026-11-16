@@ -70,4 +70,6 @@ Los E2E usan `SUPERCODER_HOME` y `SOSO_LLM_API_KEY=test-key`. El mock sirve SSE 
 
 Sangría de espacios, `fn`, efectos `! io, alloc`, última expresión del bloque como valor. El estilo canónico es el de la skill `sal-fuente` del repo hermano `sal`. Al cerrar un `.sal` tocado: `sal fmt` y, si el binario `standard` está disponible, `standard check` sobre esos ficheros.
 
+Ante cada error atribuible al compilador Sal, preparar una reproducción mínima y consultar las issues existentes de `demonodojo/sal`. Abrir una issue por cada defecto distinto si no existe ya, incluyendo la versión o revisión del compilador, destino, comandos, resultado observado y esperado. Enlazar la issue existente o nueva al informar del problema y continuar con una alternativa segura cuando sea posible. No atribuir al compilador errores de código o de configuración sin comprobarlos.
+
 Al cambiar el bucle, las herramientas o el formato de eventos, actualizar la skill de ese dominio en el mismo cambio.

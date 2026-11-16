@@ -36,19 +36,19 @@ supercoder --version | reinstalar
 | `main.sal` | CLI |
 | `agent/run.sal` | `run_agent`: prepara ctx (config, agente, sesión, prompt, herramientas) y `run_claude` |
 | `agent/loop.sal` | Bucle: compactar, petición (reintentos 429 y 400), llamadas a herramientas, tokens, guarda la sesión |
-| `agent/ctx.sal` | Contexto: un vec con ranuras y accesores `ctx_*` |
+| `agent/ctx.sal` | Contexto: struct con campos tipados, `TokenUsage`, `PermissionState` y accesores `ctx_*` |
 | `agent/messages.sal` | Constructores de mensajes OpenAI y llamadas |
 | `agent/prompt.sal` | Prompt de sistema: base + agente + AGENTS.md/CLAUDE.md + skills + entorno |
-| `agent/compact.sal` | 56 mensajes o `context_chars`: recorta salidas viejas y luego resume |
+| `agent/compact.sal` | `CompactPolicy`: 56 mensajes o `context_chars`; recorta salidas viejas y luego resume |
 | `agent/attach.sal`, `agent/vision.sal` | `--file`, `@ruta`, imágenes (visión propia o `vision_model`) |
 | `agent/child.sal` | Proceso hijo con pipes (task y TUI) |
-| `provider/openai.sal` | `/v1/chat/completions` con `tools`, Bearer, streaming SSE opcional |
+| `provider/openai.sal` | `/v1/chat/completions` con `tools`, Bearer, streaming SSE opcional y acumulación de llamadas `StreamCalls` |
 | `provider/claude.sal` | `claude -p` |
-| `tools/*.sal` | `read write edit multiedit list glob grep bash todo task`; `names.sal` alias; `registry.sal` esquemas, validación y despacho |
+| `tools/*.sal` | `read write edit multiedit list glob grep bash todo task question`; `ToolArgs` agrupa el documento y nodo de argumentos; `Todo` agrupa datos y serialización; `names.sal` alias; `registry.sal` esquemas, validación y despacho |
 | `perm.sal` | allow/ask/deny, `permission_request`, grants «always» |
-| `agents.sal` | build, plan, general, explore + `.supercoder|.opencode|.claude/agents/*.md` |
-| `skills.sal` | `SKILL.md` de proyecto (cwd y ascendientes hasta `.git`) y de usuario (`~/.supercoder`, `~/.config/opencode`, `~/.claude`), herramienta `skill`, `/nombre args` del usuario, `disable-model-invocation` |
-| `events.sal`, `session.sal`, `config.sal`, `tui.sal`, `util.sal` | Eventos, sesiones, configuración, TUI, rutas y fechas |
+| `agents.sal` | Perfiles `Agent` tipados: build, plan, general, explore + `.supercoder|.opencode|.claude/agents/*.md` |
+| `skills.sal` | `SKILL.md` de proyecto (cwd y ascendientes hasta `.git`) y de usuario (`~/.agents`, `~/.supercoder`, `~/.config/opencode`, `~/.claude`), herramienta `skill`, `/nombre args` del usuario, `disable-model-invocation` |
+| `events.sal`, `session.sal`, `config.sal`, `tui.sal`, `util.sal` | Eventos, sesiones (`Session`), configuración, TUI, rutas y fechas |
 
 ## Un turno
 
@@ -56,7 +56,7 @@ supercoder --version | reinstalar
 
 ## Eventos (`--format json`)
 
-Una línea por evento con `type`, `timestamp`, `sessionID`, `part`. Compatibles con `runner.rs`: `step_start`, `tool_use` (`state.status` running|completed|error, `input`, `output`/`error`, `title`), `text`, `step_finish` (`tokens.input/output` reales), `error` (`error.data.message`). Extra (el ejecutor los ignora): `text_delta`, `permission_request` (`id, callID, tool, title, input`; respuesta por stdin `{"type":"permission_reply","id":..,"reply":"once|always|reject"}`), `todo`, `subagent` (`callID`, `event` = evento original del hijo).
+Una línea por evento con `type`, `timestamp`, `sessionID`, `part`. Compatibles con `runner.rs`: `step_start`, `tool_use` (`state.status` running|completed|error, `input`, `output`/`error`, `title`), `text`, `step_finish` (`tokens.input/output` reales), `error` (`error.data.message`). El `text` final oculta las etiquetas XML del protocolo de herramientas (`tool_call`, `function`, `parameter`, `invoke`, `tool_use`…) y `ev_think_style` también las quita del texto de la TUI; `text_delta` va sin filtrar y cada cliente limpia el texto acumulado. Extra (el ejecutor los ignora): `text_delta`, `permission_request` (`id, callID, tool, title, input`; respuesta por stdin `{"type":"permission_reply","id":..,"reply":"once|always|reject"}`), `question_request` (`id`, `question`, `options`; respuesta `question_reply` con `id` y `answer`), `todo`, `subagent` (`callID`, `event` = evento original del hijo).
 
 ## Permisos
 
@@ -76,7 +76,7 @@ Reglas de `"permission"` en `supercoder.json` y del agente (`allow|ask|deny`; en
 
 ## Convenciones de Sal que importan aquí
 
-Sin structs multicampo: asas `vec` y accesores. Cada función con efectos propios los declara. Los nombres de módulos importados se aplanan: prefijar. Las cadenas se mueven al asignar (copiar con `str_slice(s, 0, str_len(s))`). `on` y `from` están reservadas. `{` y `}` dentro de una cadena son literales. La memoria no se libera: acumular con `x = x + …`.
+El proyecto usa structs multicampo y admite métodos; agrupar datos y comportamiento cuando corresponda. Cada función o método con efectos propios los declara. Los nombres de módulos importados se aplanan: prefijar funciones libres. Respetar las reglas de propiedad y préstamos de cadenas y colecciones. `on` y `from` están reservadas. `{` y `}` dentro de una cadena son literales.
 
 ## Skills y herramientas: detalles que pesan
 

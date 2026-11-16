@@ -13,6 +13,7 @@ import "src/tools/grep.sal"
 import "src/tools/bash.sal"
 import "src/tools/todo.sal"
 import "src/tools/task.sal"
+import "src/tools/question.sal"
 import "src/agents.sal"
 import "src/skills.sal"
 import "src/perm.sal"
@@ -54,6 +55,8 @@ fn tool_required(canon: &String) -> String
         return "name"
     if str_eq(canon, "task") != 0
         return "prompt"
+    if str_eq(canon, "question") != 0
+        return "question"
     ""
 
 # ---------------------------------------------------------------- esquemas
@@ -96,6 +99,9 @@ fn tdef_for(canon: &String) -> String ! io, alloc
         return tdef(&"todoread", &"Read the current task list.", &"", &"")
     if str_eq(canon, "task") != 0
         return tdef(&"task", &("Launch a subagent to handle a complex, self-contained task autonomously (searching a large codebase, researching a question, a multi-step change). The subagent works in its own context and returns only its final report, so describe the task completely in the prompt: it cannot see this conversation. Available subagents:" + char_to_str(10) + agents_describe(1)), &(tprop(&"description", &"string", &"Short (3-5 words) description of the task") + "," + tprop(&"prompt", &"string", &"The full task for the subagent, with all the context it needs") + "," + tprop(&"subagent_type", &"string", &"Name of the subagent to use")), &"description,prompt,subagent_type")
+    if str_eq(canon, "question") != 0
+        options = jb_kv(&"options", &jb_obj(&(jb_kv(&"type", &json_quote(&"array")) + "," + jb_kv(&"items", &jb_obj(&jb_kv(&"type", &json_quote(&"string")))) + "," + jb_kv(&"description", &json_quote(&"Optional suggested answers; free text is also accepted")))))
+        return tdef(&"question", &"Ask the user for missing information or a decision and wait for their answer. Use only when needed.", &(tprop(&"question", &"string", &"The question to ask") + "," + options), &"question")
     if str_eq(canon, "skill") != 0
         return tdef(&"skill", &"Load a skill: specialized instructions for a kind of task. The available skills and when to use them are listed in the system prompt.", &(tprop(&"name", &"string", &"Name of the skill to load") + "," + tprop(&"arguments", &"string", &"Optional arguments for the skill (replaces $ARGUMENTS in its instructions)")), &"name")
     ""
@@ -150,14 +156,18 @@ fn tool_input_json(args: &String) -> String ! alloc
 
 # Primer parámetro obligatorio que falta, o "".
 fn tool_missing(d: &JsonDoc, a: Int, canon: &String) -> String ! alloc
+    args = ToolArgs(d, a)
     groups = sk_split_char(&tool_required(&canon), 59)
     i = 0
     n = sk_sl_len(&groups)
     while i < n
         g = sk_sl_get(&groups, i)
         if str_len(g) > 0
-            if arg_has(d, a, g) == 0
-                return str_slice(g, 0, sk_index_of(g, &","))
+            if args.has(g) == 0
+                comma = sk_index_of(g, &",")
+                if comma < 0
+                    return g.dup()
+                return str_slice(g, 0, comma)
         i = i + 1
     ""
 
@@ -206,4 +216,6 @@ fn tool_exec(c: &mut Ctx, name: &String, args_text: &String) -> ToolResult ! io,
         return tool_skill(c, &d, a)
     if str_eq(canon, "task") != 0
         return tool_task(c, &d, a)
+    if str_eq(canon, "question") != 0
+        return tool_question(c, &d, a)
     tr_err(&("Tool '" + canon + "' is not implemented"))

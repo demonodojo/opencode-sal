@@ -5,6 +5,13 @@ import "support/assert.sal"
 
 fn main() -> Int ! io, alloc
     f = 0
+    input_doc = json_parse(&"{\"alias\":\"value\",\"count\":\" 42 \",\"enabled\":\"TrUe\",\"empty\":null}")
+    args = ToolArgs(&input_doc, json_root(&input_doc))
+    f = f + ck_str(&args.string(&"missing,alias", "fallback"), &"value", 40)
+    f = f + ck_int(args.integer(&"count", 0), 42, 41)
+    f = f + ck_int(args.boolean(&"enabled", 0), 1, 42)
+    f = f + ck_str(&args.string(&"empty", "fallback"), &"fallback", 43)
+    f = f + ck_int(args.has(&"missing"), 0, 44)
     f = f + ck_str(&tool_canon(&"Read_File"), &"read", 1)
     f = f + ck_str(&tool_canon(&"reemplazar_texto"), &"edit", 2)
     f = f + ck_str(&tool_canon(&"bash"), &"bash", 3)
@@ -46,6 +53,17 @@ fn main() -> Int ! io, alloc
     f = f + ck_int(tr_failed(&r7), 1, 28)
     f = f + ck_str(&tool_input_json(&"{ \"a\" : 1 }"), &"{\"a\":1}", 29)
     f = f + ck_str(&tool_input_json(&"garbage"), &"{}", 30)
+
+    f = f + ck_int(tool_known(&"question"), 1, 34)
+    f = f + ck_str(&tool_canon(&"ask_user"), &"question", 35)
+    q = tool_exec(&mut c, &"question", &"{}")
+    # Sin permiso de herramienta, la llamada debe seguir siendo rechazada.
+    f = f + ck_int(tr_failed(&q), 1, 36)
+    x = ctx_set_allow(&mut c, &"")
+    q2 = tool_exec(&mut c, &"question", &"{}")
+    f = f + ck_contains(&tr_output(&q2), &"Missing required parameter 'question'", 37)
+    q3 = tool_exec(&mut c, &"question", &"{\"question\":\"¿Cómo?\"}")
+    f = f + ck_contains(&tr_output(&q3), &"unavailable", 38)
 
     sp = prompt_build(&c, &"")
     f = f + ck_contains(&sp, &"You are supercoder", 31)

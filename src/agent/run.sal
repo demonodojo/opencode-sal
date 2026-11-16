@@ -88,26 +88,39 @@ fn claude_finish(c: &mut Ctx, st: &CsState, prompt: &String) -> Int ! io, alloc
     w4 = session_save(&ctx_session(c), ctx_msgs(c))
     0
 
-# Opciones de ejecución: vec [out, max_turns, session, cont, model, agent, interactive, yes].
-fn run_agent(prompt: &String, out_mode: Int, max_turns: Int, session_id: &String, cont: Int, model_flag: &String, agent_name: &String, interactive: Int, yes: Int, depth: Int, files: &String, osc_flag: Int) -> Int ! io, alloc
+struct RunOptions
+    prompt: String
+    out_mode: Int
+    max_turns: Int
+    session_id: String
+    cont: Int
+    model_flag: String
+    agent_name: String
+    interactive: Int
+    yes: Int
+    depth: Int
+    files: String
+    osc_flag: Int
+
+method RunOptions.run(&self) -> Int ! io, alloc
     c = ctx_new()
     cfg = cfg_load()
     x = ctx_set_cfg(&mut c, cfg)
-    x = ctx_set_out(&mut c, out_mode)
-    x = ctx_set_max_turns(&mut c, max_turns)
-    x = ctx_set_session(&mut c, &session_id)
-    x = ctx_set_agent(&mut c, &agent_name)
-    x = ctx_set_interactive(&mut c, interactive)
-    x = ctx_set_yes(&mut c, yes)
-    x = ctx_set_osc(&mut c, osc_flag)
-    ag = agent_find(&agent_name)
+    x = ctx_set_out(&mut c, self.out_mode)
+    x = ctx_set_max_turns(&mut c, self.max_turns)
+    x = ctx_set_session(&mut c, &self.session_id)
+    x = ctx_set_agent(&mut c, &self.agent_name)
+    x = ctx_set_interactive(&mut c, self.interactive)
+    x = ctx_set_yes(&mut c, self.yes)
+    x = ctx_set_osc(&mut c, self.osc_flag)
+    ag = agent_find(&self.agent_name)
     if ag_found(&ag) == 0
-        x = ev_error(&c, &("Unknown agent '" + agent_name + "'. Available agents:" + char_to_str(10) + agents_describe(0)))
+        x = ev_error(&c, &("Unknown agent '" + self.agent_name + "'. Available agents:" + char_to_str(10) + agents_describe(0)))
         return 2
-    x = ctx_set_depth(&mut c, depth)
+    x = ctx_set_depth(&mut c, self.depth)
     x = ctx_set_allow(&mut c, &ag_allow(&ag))
     x = ctx_set_agent_perm(&mut c, &ag_perm(&ag))
-    flag = model_flag
+    flag = self.model_flag.dup()
     if str_len(flag) == 0
         flag = ag_model(&ag)
     model = cfg_model_for(&cfg, &flag)
@@ -115,18 +128,19 @@ fn run_agent(prompt: &String, out_mode: Int, max_turns: Int, session_id: &String
     x = ctx_set_shell(&mut c, &cfg_shell(&cfg))
     x = ctx_set_vision(&mut c, cfg_vision(&cfg, &model))
     msgs = sk_sl_new()
-    if cont != 0
-        msgs = session_load(&session_id)
+    if self.cont != 0
+        msgs = session_load(&self.session_id)
     x = ctx_set_msgs(&mut c, msgs)
     x = perm_grants_load(&mut c)
     x = todos_load(&mut c)
     if cfg_is_claude(&cfg, &model) != 0
-        return run_claude(&mut c, &prompt, &files)
+        return run_claude(&mut c, &self.prompt, &self.files)
     sys = prompt_build(&c, &ag_prompt(&ag))
     x = ctx_set_system(&mut c, &sys)
-    defs = tools_defs_depth(&ctx_allow(&c), depth)
+    defs = tools_defs_depth(&ctx_allow(&c), self.depth)
     x = ctx_set_tools(&mut c, &defs)
-    x = ctx_msgs_mut(&mut c).push(attach_user_message(&mut c, &skill_expand_prompt(&prompt), &files))
+    user_message = attach_user_message(&mut c, &skill_expand_prompt(&self.prompt), &self.files)
+    x = ctx_msgs_mut(&mut c).push(user_message)
     agent_loop(&mut c)
 
 # `supercoder tool NOMBRE JSON`: ejecuta una herramienta sin modelo (depuración y pruebas).

@@ -51,6 +51,14 @@ fn child_start(bin: &String, args: &List[String]) -> Int ! io, alloc
 
 # Siguiente línea de stdout del hijo; char 4 al terminar o tras `idle_ms` sin datos.
 fn child_read_line(h: Int, idle_ms: Int) -> String ! io, alloc
+    child_read_go(h, idle_ms, 0)
+
+# Igual, pero si vence `idle_ms` sin datos devuelve "" en vez de char 4, para distinguir
+# "el hijo sigue callado" de "el hijo ha terminado".
+fn child_read_line_idle(h: Int, idle_ms: Int) -> String ! io, alloc
+    child_read_go(h, idle_ms, 1)
+
+fn child_read_go(h: Int, idle_ms: Int, soft: Int) -> String ! io, alloc
     fd = vec_get(h, 1)
     st = vec_get(h, 3)
     chunk = Bytes.new(65536)
@@ -79,9 +87,16 @@ fn child_read_line(h: Int, idle_ms: Int) -> String ! io, alloc
             else
                 waited = waited + 1000
                 if waited >= idle_ms
-                    result = String.from_char(4)
+                    if soft != 0
+                        result = ""
+                    else
+                        result = String.from_char(4)
                     done = 1
     result
+
+# Mata al hijo (SIGTERM) para cancelar el turno en marcha.
+fn child_kill(h: Int) -> Int ! io
+    kill_pid(vec_get(h, 0), 15)
 
 fn child_write_line(h: Int, line: &String) -> Int ! io, alloc
     Fd.new(vec_get(h, 2)).write_str(&(line + String.from_char(10)))

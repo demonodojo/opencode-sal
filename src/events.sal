@@ -10,17 +10,270 @@ import "salkit/fsx.sal"
 import "src/agent/ctx.sal"
 import "src/util.sal"
 
-fn ev_tui_log_path() -> String
-    "/tmp/supercoder-sal-tui.log"
+# El identificador de sesión se conserva durante toda la vida de la TUI.
+fn ev_tui_log_path(id: &String) -> String ! alloc
+    "/tmp/supercoder-sal-tui-" + id + ".log"
 
-fn ev_tui_log_reset() -> Int ! io, alloc
-    fsx_write(&ev_tui_log_path(), &"")
+fn ev_tui_log_reset(id: &String) -> Int ! io, alloc
+    fsx_write(&ev_tui_log_path(id), &"")
 
-fn ev_tui_log_add(line: &String) -> Int ! io, alloc
-    fsx_append(&ev_tui_log_path(), &(line + "\n"))
+fn ev_tui_log_add(id: &String, line: &String) -> Int ! io, alloc
+    path = ev_tui_log_path(id)
+    entry = line + "\n"
+    if str_len(entry) > 65536
+        entry = sk_truncate_middle(&entry, 65536)
+    # El historial de pantalla es solo un búfer de presentación. Limitarlo evita que
+    # cada redibujado vuelva a cargar una sesión entera en memoria.
+    if fsx_size(&path) + str_len(entry) > 1048576
+        x = fsx_write(&path, &"")
+    fsx_append(&path, &entry)
 
-fn ev_tui_log_read() -> String ! io, alloc
-    fsx_read_text(&ev_tui_log_path())
+fn ev_tui_log_read(id: &String) -> String ! io, alloc
+    fsx_read_text(&ev_tui_log_path(id))
+
+fn ev_tui_log_remove(id: &String) -> Int ! io, alloc
+    fsx_remove(&ev_tui_log_path(id))
+
+# Carácter válido en el nombre de una etiqueta XML (letras, dígitos, '_', ':' y '-').
+fn ev_tag_char(c: Int) -> Int
+    if c >= 65
+        if c <= 90
+            return 1
+    if c >= 97
+        if c <= 122
+            return 1
+    if c >= 48
+        if c <= 57
+            return 1
+    if c == 95
+        return 1
+    if c == 58
+        return 1
+    if c == 45
+        return 1
+    0
+
+# Índice donde acaba el nombre de la etiqueta que empieza en `i` (apunta a '<'); -1 si
+# todavía no hay un delimitador tras el nombre. El nombre puede ir precedido de '/'.
+fn ev_tag_name_end(s: &String, i: Int) -> Int ! alloc
+    n = str_len(s)
+    j = i + 1
+    if j < n
+        if str_char(s, j) == 47
+            j = j + 1
+    k = j
+    while k < n
+        if ev_tag_char(str_char(s, k)) == 0
+            return k
+        k = k + 1
+    -1
+
+# Índice justo después del '>' de la etiqueta que empieza en `i` (respeta comillas); -1 si no cierra.
+fn ev_tag_end(s: &String, i: Int) -> Int ! alloc
+    n = str_len(s)
+    k = i
+    quote = 0
+    while k < n
+        c = str_char(s, k)
+        if quote != 0
+            if c == quote
+                quote = 0
+        elsif c == 34
+            quote = 34
+        elsif c == 39
+            quote = 39
+        elsif c == 62
+            return k + 1
+        k = k + 1
+    -1
+
+# Etiquetas que identifican llamadas a herramientas en el texto de algunos modelos
+# (formato XML de Qwen, Claude y similares). No forman parte de la respuesta visible.
+fn ev_tag_proto(name: &String) -> Int
+    if str_eq(name, "tool_call") != 0
+        return 1
+    if str_eq(name, "tool_calls") != 0
+        return 1
+    if str_eq(name, "function_calls") != 0
+        return 1
+    if str_eq(name, "function_call") != 0
+        return 1
+    if str_eq(name, "invoke") != 0
+        return 1
+    if str_eq(name, "parameter") != 0
+        return 1
+    if str_eq(name, "function") != 0
+        return 1
+    if str_eq(name, "tool_use") != 0
+        return 1
+    if str_eq(name, "tool_result") != 0
+        return 1
+    if str_eq(name, "antml:invoke") != 0
+        return 1
+    if str_eq(name, "antml:parameter") != 0
+        return 1
+    if str_eq(name, "antml:function_calls") != 0
+        return 1
+    0
+
+# Contenedores cuyo contenido íntegro debe ocultarse hasta la etiqueta de cierre.
+fn ev_tag_block(name: &String) -> Int
+    if str_eq(name, "tool_call") != 0
+        return 1
+    if str_eq(name, "tool_calls") != 0
+        return 1
+    if str_eq(name, "function_calls") != 0
+        return 1
+    if str_eq(name, "function_call") != 0
+        return 1
+    if str_eq(name, "invoke") != 0
+        return 1
+    if str_eq(name, "parameter") != 0
+        return 1
+    if str_eq(name, "function") != 0
+        return 1
+    if str_eq(name, "tool_use") != 0
+        return 1
+    if str_eq(name, "tool_result") != 0
+        return 1
+    if str_eq(name, "antml:invoke") != 0
+        return 1
+    if str_eq(name, "antml:parameter") != 0
+        return 1
+    if str_eq(name, "antml:function_calls") != 0
+        return 1
+    0
+
+# 1 si `name` es el comienzo de una etiqueta del protocolo (p. ej. "tool_" de "tool_call"):
+# durante el streaming la etiqueta puede llegar partida y no debe mostrarse a medias.
+fn ev_tag_partial(name: &String) -> Int ! alloc
+    if str_len(name) == 0
+        return 0
+    if sk_starts_with(&"tool_calls", &name) != 0
+        return 1
+    if sk_starts_with(&"tool_call", &name) != 0
+        return 1
+    if sk_starts_with(&"tool_use", &name) != 0
+        return 1
+    if sk_starts_with(&"tool_result", &name) != 0
+        return 1
+    if sk_starts_with(&"function_calls", &name) != 0
+        return 1
+    if sk_starts_with(&"function_call", &name) != 0
+        return 1
+    if sk_starts_with(&"function", &name) != 0
+        return 1
+    if sk_starts_with(&"invoke", &name) != 0
+        return 1
+    if sk_starts_with(&"parameter", &name) != 0
+        return 1
+    if sk_starts_with(&"antml:invoke", &name) != 0
+        return 1
+    if sk_starts_with(&"antml:parameter", &name) != 0
+        return 1
+    if sk_starts_with(&"antml:function_calls", &name) != 0
+        return 1
+    0
+
+# Posición de la etiqueta de cierre de `name` a partir de `from`; -1 si no aparece.
+fn ev_tag_close(s: &String, name: &String, from: Int) -> Int ! alloc
+    token = "</" + str_slice(name, 0, str_len(name))
+    n = str_len(s)
+    p = sk_index_from(s, &token, from)
+    while p >= 0
+        after = p + str_len(&token)
+        if after >= n
+            return p
+        c = str_char(s, after)
+        if c == 62
+            return p
+        if c == 32
+            return p
+        if c == 10
+            return p
+        if c == 9
+            return p
+        p = sk_index_from(s, &token, after)
+    -1
+
+# Oculta del texto las etiquetas del protocolo XML de herramientas (y sus bloques),
+# para que no lleguen a lo que se muestra al usuario.
+fn ev_hide_tags(s: &String) -> String ! alloc
+    n = str_len(s)
+    out = ""
+    i = 0
+    while i < n
+        if str_char(s, i) == 60
+            ne = ev_tag_name_end(s, i)
+            ns = i + 1
+            closing = 0
+            if ns < n
+                if str_char(s, ns) == 47
+                    ns = ns + 1
+                    closing = 1
+            if ne < 0
+                if ev_tag_partial(&str_slice(s, ns, n)) != 0
+                    return out
+            if ne > ns
+                name = sk_lower(&str_slice(s, ns, ne))
+                if ev_tag_proto(&name) != 0
+                    te = ev_tag_end(s, i)
+                    if te < 0
+                        return out
+                    if closing != 0
+                        i = te
+                    elsif ev_tag_block(&name) != 0
+                        ce = ev_tag_close(s, &name, te)
+                        if ce < 0
+                            i = te
+                        else
+                            cte = ev_tag_end(s, ce)
+                            if cte < 0
+                                i = n
+                            else
+                                i = cte
+                    else
+                        i = te
+                else
+                    out = out + char_to_str(str_char(s, i))
+                    i = i + 1
+            else
+                out = out + char_to_str(str_char(s, i))
+                i = i + 1
+        else
+            out = out + char_to_str(str_char(s, i))
+            i = i + 1
+    out
+
+# Muestra el razonamiento en gris y oculta sus delimitadores internos.
+fn ev_think_style_go(s: &String, active: Int) -> String ! alloc
+    n = str_len(s)
+    if active != 0
+        close = sk_index_of(s, &"</think>")
+        if close < 0
+            return char_to_str(27) + "[90m" + s + char_to_str(27) + "[0m"
+        before = str_slice(s, 0, close)
+        after = str_slice(s, close + 8, n)
+        return char_to_str(27) + "[90m" + before + char_to_str(27) + "[0m" + ev_think_style_go(&after, 0)
+    open = sk_index_of(s, &"<think>")
+    close = sk_index_of(s, &"</think>")
+    if open < 0
+        if close < 0
+            return s.dup()
+        before = str_slice(s, 0, close)
+        after = str_slice(s, close + 8, n)
+        return before + ev_think_style_go(&after, 0)
+    if close >= 0
+        if close < open
+            before = str_slice(s, 0, close)
+            after = str_slice(s, close + 8, n)
+            return before + ev_think_style_go(&after, 0)
+    before = str_slice(s, 0, open)
+    after = str_slice(s, open + 7, n)
+    before + ev_think_style_go(&after, 1)
+
+fn ev_think_style(s: &String) -> String ! alloc
+    ev_think_style_go(&ev_hide_tags(&s), 0)
 
 # Escribe un evento JSON: {"type":..,"timestamp":..,"sessionID":..,"part":{..}}
 fn ev_json(c: &Ctx, type: &String, part_json: &String) -> Int ! io, alloc
@@ -43,18 +296,19 @@ fn ev_step_finish(c: &Ctx, reason: &String, inp: Int, out: Int) -> Int ! io, all
 
 fn ev_text(c: &Ctx, text: &String) -> Int ! io, alloc
     if ctx_out(c) == 2
-        return ev_tui_log_add(&text)
+        return ev_tui_log_add(&ctx_session(c), &ev_think_style(&text))
     if ctx_out(c) == 1
-        part = jb_obj(&(jb_kv(&"type", &json_quote(&"text")) + "," + jb_kv(&"text", &json_quote(&text))))
+        shown = ev_hide_tags(&text)
+        part = jb_obj(&(jb_kv(&"type", &json_quote(&"text")) + "," + jb_kv(&"text", &json_quote(&shown))))
         return ev_json(c, &"text", &part)
-    Fd.new(1).write_str(&(text + "\n"))
+    Fd.new(1).write_str(&(ev_think_style(&text) + "\n"))
 
 # Herramienta: status "running" | "completed" | "error". `input_json` es el objeto de
 # argumentos (JSON); `output` es el resultado o el mensaje de error.
 fn ev_tool(c: &Ctx, call_id: &String, tool: &String, status: &String, input_json: &String, output: &String, title: &String) -> Int ! io, alloc
     if ctx_out(c) == 2
         if str_eq(status, "running") != 0
-            return ev_tui_log_add(&("tool " + tool))
+            return ev_tui_log_add(&ctx_session(c), &("tool " + tool))
         return 0
     if ctx_out(c) == 1
         st = jb_kv(&"status", &json_quote(&status)) + "," + jb_kv(&"input", &input_json)
@@ -70,7 +324,7 @@ fn ev_tool(c: &Ctx, call_id: &String, tool: &String, status: &String, input_json
 
 fn ev_error(c: &Ctx, msg: &String) -> Int ! io, alloc
     if ctx_out(c) == 2
-        return ev_tui_log_add(&("error: " + msg))
+        return ev_tui_log_add(&ctx_session(c), &("error: " + msg))
     if ctx_out(c) == 1
         head = jb_kv(&"type", &json_quote(&"error")) + "," + jb_kv(&"timestamp", &int_to_str(now_ms())) + "," + jb_kv(&"sessionID", &json_quote(&ctx_session(c)))
         data = jb_obj(&jb_kv(&"message", &json_quote(&msg)))
@@ -84,6 +338,13 @@ fn ev_permission(c: &Ctx, id: &String, call_id: &String, tool: &String, title: &
     if ctx_out(c) == 1
         part = jb_obj(&(jb_kv(&"id", &json_quote(&id)) + "," + jb_kv(&"callID", &json_quote(&call_id)) + "," + jb_kv(&"tool", &json_quote(&tool)) + "," + jb_kv(&"title", &json_quote(&title)) + "," + jb_kv(&"input", &input_json)))
         return ev_json(c, &"permission_request", &part)
+    0
+
+# Pregunta interactiva: el cliente responde con question_reply y el mismo id.
+fn ev_question(c: &Ctx, id: &String, question: &String, options: &String) -> Int ! io, alloc
+    if ctx_out(c) == 1
+        part = jb_obj(&(jb_kv(&"id", &json_quote(&id)) + "," + jb_kv(&"callID", &json_quote(&ctx_call(c))) + "," + jb_kv(&"question", &json_quote(&question)) + "," + jb_kv(&"options", &options)))
+        return ev_json(c, &"question_request", &part)
     0
 
 # Lista de tareas actualizada (`todos_json` es un array JSON).
@@ -107,7 +368,7 @@ fn ev_text_delta(c: &Ctx, text: &String) -> Int ! io, alloc
 # Mensaje de estado del agente o del proveedor (arranque, "sigue en marcha"...). No lo lee runner.rs.
 fn ev_status(c: &Ctx, msg: &String) -> Int ! io, alloc
     if ctx_out(c) == 2
-        return ev_tui_log_add(&("· " + msg))
+        return ev_tui_log_add(&ctx_session(c), &("· " + msg))
     if ctx_out(c) == 1
         return ev_json(c, &"status", &jb_obj(&jb_kv(&"text", &json_quote(&msg))))
     Fd.new(2).write_str(&("· " + msg + "\n"))

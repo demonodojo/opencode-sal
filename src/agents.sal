@@ -6,8 +6,7 @@
 # el cuerpo. `tools` es una lista ("read, grep") o un mapa ("edit: false"); `permission` usa el
 # mismo formato que la sección "permission" de supercoder.json.
 #
-# Un agente guarda en una lista: 0 nombre, 1 descripción, 2 modo, 3 modelo, 4 herramientas
-# permitidas ("" = todas), 5 permisos (objeto JSON como texto), 6 prompt.
+# Las herramientas permitidas son "" para todas; los permisos son JSON como texto.
 
 import "salkit/json.sal"
 import "salkit/fsx.sal"
@@ -16,54 +15,56 @@ import "salkit/frontmatter.sal"
 import "src/tools/names.sal"
 
 struct Agent
-    cells: List[String]
+    found: Int
+    name: String
+    desc: String
+    mode: String
+    model: String
+    allow: String
+    perm: String
+    prompt: String
 
 fn ag_new(name: &String, desc: &String, mode: &String, model: &String, allow: &String, perm: &String, prompt: &String) -> Agent ! alloc
-    c = List.new[String]()
-    c.push(name.dup())
-    c.push(desc.dup())
-    c.push(mode.dup())
-    c.push(model.dup())
-    c.push(allow.dup())
-    c.push(perm.dup())
-    c.push(prompt.dup())
-    Agent(c)
+    Agent(1, name.dup(), desc.dup(), mode.dup(), model.dup(), allow.dup(), perm.dup(), prompt.dup())
 
 fn ag_found(a: &Agent) -> Int
-    a.cells.len()
-
-fn ag_get(a: &Agent, i: Int) -> String ! alloc
-    a.cells.get(i).dup()
+    a.found
 
 fn ag_name(a: &Agent) -> String ! alloc
-    ag_get(&a, 0)
+    a.name.dup()
 
 fn ag_desc(a: &Agent) -> String ! alloc
-    ag_get(&a, 1)
+    a.desc.dup()
 
 fn ag_mode(a: &Agent) -> String ! alloc
-    ag_get(&a, 2)
+    a.mode.dup()
 
 fn ag_model(a: &Agent) -> String ! alloc
-    ag_get(&a, 3)
+    a.model.dup()
 
 fn ag_allow(a: &Agent) -> String ! alloc
-    ag_get(&a, 4)
+    a.allow.dup()
 
 fn ag_perm(a: &Agent) -> String ! alloc
-    ag_get(&a, 5)
+    a.perm.dup()
 
 fn ag_prompt(a: &Agent) -> String ! alloc
-    ag_get(&a, 6)
+    a.prompt.dup()
 
 # 1 si puede ejecutarse como agente principal / como subagente.
 fn ag_is_primary(a: &Agent) -> Int ! alloc
-    if str_eq(ag_mode(&a), "subagent") != 0
+    a.is_primary()
+
+method Agent.is_primary(&self) -> Int ! alloc
+    if str_eq(self.mode, "subagent") != 0
         return 0
     1
 
 fn ag_is_sub(a: &Agent) -> Int ! alloc
-    if str_eq(ag_mode(&a), "primary") != 0
+    a.is_sub()
+
+method Agent.is_sub(&self) -> Int ! alloc
+    if str_eq(self.mode, "primary") != 0
         return 0
     1
 
@@ -192,13 +193,14 @@ fn agent_index(list: &List[Agent], name: &String) -> Int ! alloc
         i = i + 1
     0 - 1
 
-# Agente por nombre; si no existe, uno con la lista vacía (ver `ag_found`).
+# Agente por nombre; si no existe, devuelve un perfil marcado como ausente.
 fn agent_find(name: &String) -> Agent ! io, alloc
     all = agents_all()
     i = agent_index(&all, &name)
     if i < 0
-        return Agent(List.new[String]())
-    Agent(all.get(i).cells.clone())
+        return Agent(0, d"", d"", d"", d"", d"", d"", d"")
+    a = all.get(i)
+    ag_new(&a.name, &a.desc, &a.mode, &a.model, &a.allow, &a.perm, &a.prompt)
 
 # Una línea por agente: "nombre (modo): descripción".
 fn agents_describe(subagents_only: Int) -> String ! io, alloc

@@ -12,11 +12,23 @@ import "src/agent/messages.sal"
 import "src/config.sal"
 import "src/provider/openai.sal"
 
-fn compact_max_messages() -> Int
-    56
+struct CompactPolicy
+    max_messages: Int
+    keep_tail: Int
+    max_chars: Int
 
-fn compact_keep_tail() -> Int
-    10
+fn compact_policy(c: &Ctx) -> CompactPolicy ! alloc
+    CompactPolicy(56, 10, cfg_context_chars(ctx_cfg(c), &ctx_model(c)))
+
+method CompactPolicy.over(&self, msgs: &List[String]) -> Int ! alloc
+    if msgs.len() > self.max_messages
+        return 1
+    if compact_chars(msgs) > self.max_chars
+        return 1
+    0
+
+method CompactPolicy.trim_limit(&self, msgs: &List[String]) -> Int
+    msgs.len() - self.keep_tail
 
 fn compact_chars(msgs: &List[String]) -> Int
     total = 0
@@ -88,8 +100,9 @@ fn compact_drop_images(d: &JsonDoc, r: Int, msg: String) -> String ! alloc
 
 # Recorta los mensajes anteriores a la cola. Devuelve cuántos cambió.
 fn compact_trim(c: &mut Ctx) -> Int ! alloc
+    policy = compact_policy(c)
     msgs = ctx_msgs_mut(c)
-    limit = msgs.len() - compact_keep_tail()
+    limit = policy.trim_limit(msgs)
     changed = 0
     i = 0
     while i < limit
@@ -169,7 +182,8 @@ fn compact_ask_model(c: &mut Ctx, old: &List[String]) -> String ! io, alloc
 fn compact_summarize(c: &mut Ctx) -> Int ! io, alloc
     msgs = ctx_msgs(c).clone()
     n = sk_sl_len(&msgs)
-    b = n - compact_keep_tail()
+    policy = compact_policy(c)
+    b = policy.trim_limit(&msgs)
     if b < 2
         return 0
     # La cola no puede empezar por un resultado de herramienta.
@@ -203,11 +217,7 @@ fn compact_apply(c: &mut Ctx, b: Int) -> Int ! io, alloc
     1
 
 fn compact_over(c: &Ctx) -> Int ! alloc
-    if ctx_msgs(c).len() > compact_max_messages()
-        return 1
-    if compact_chars(ctx_msgs(c)) > cfg_context_chars(ctx_cfg(c), &ctx_model(c))
-        return 1
-    0
+    compact_policy(c).over(ctx_msgs(c))
 
 # Llamar antes de cada petición. Devuelve 1 si el historial cambió.
 fn compact_if_needed(c: &mut Ctx) -> Int ! io, alloc

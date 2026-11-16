@@ -13,6 +13,9 @@ fn main() -> Int ! io, alloc
     f = f + ck_int(ag_is_primary(&ex), 0, 5)
     f = f + ck_int(ag_is_primary(all.get(0)), 1, 6)
     f = f + ck_int(ag_is_sub(all.get(0)), 0, 7)
+    f = f + ck_int(ex.is_sub(), 1, 8)
+    missing = agent_find(&"un agente inexistente")
+    f = f + ck_int(ag_found(&missing), 0, 9)
 
     base = "target/agentstest"
     nl = char_to_str(10)
@@ -22,7 +25,7 @@ fn main() -> Int ! io, alloc
     f = f + ck_str(&ag_desc(&a), &"Reviews code", 11)
     f = f + ck_str(&ag_mode(&a), &"subagent", 12)
     f = f + ck_str(&ag_model(&a), &"big-model", 13)
-    f = f + ck_str(&ag_allow(&a), &"read,list,glob,grep,bash,todowrite,todoread,skill,task", 14)
+    f = f + ck_str(&ag_allow(&a), &"read,list,glob,grep,bash,todowrite,todoread,skill,task,question", 14)
     f = f + ck_str(&ag_perm(&a), &"{\"bash\":\"deny\"}", 15)
     f = f + ck_str(&ag_prompt(&a), &"You review code.", 16)
 

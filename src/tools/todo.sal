@@ -8,6 +8,21 @@ import "src/events.sal"
 import "src/session.sal"
 import "src/tools/common.sal"
 
+struct Todo
+    content: String
+    status: String
+    priority: String
+
+method Todo.is_open(&self) -> Int ! alloc
+    if str_eq(self.status, "completed") != 0
+        return 0
+    if str_eq(self.status, "cancelled") != 0
+        return 0
+    1
+
+method Todo.to_json(&self) -> String ! alloc
+    jb_obj(&(jb_kv(&"content", &json_quote(&self.content)) + "," + jb_kv(&"status", &json_quote(&self.status)) + "," + jb_kv(&"priority", &json_quote(&self.priority))))
+
 fn todo_status_ok(s: &String) -> Int ! alloc
     if str_eq(s, "pending") != 0
         return 1
@@ -78,10 +93,9 @@ fn tool_todowrite(c: &mut Ctx, d: &JsonDoc, a: Int) -> ToolResult ! io, alloc
         prio = sk_lower(&sk_trim(&json_get_str(&d, n, &"priority")))
         if todo_priority_ok(&prio) == 0
             prio = "medium"
-        if str_eq(status, "completed") == 0
-            if str_eq(status, "cancelled") == 0
-                open = open + 1
-        x = sk_sl_push(&mut items, jb_obj(&(jb_kv(&"content", &json_quote(&content)) + "," + jb_kv(&"status", &json_quote(&status)) + "," + jb_kv(&"priority", &json_quote(&prio)))))
+        todo = Todo(content, status, prio)
+        open = open + todo.is_open()
+        x = sk_sl_push(&mut items, todo.to_json())
         n = json_next(&d, n)
     text = jb_arr(&jb_join(&items))
     x = ctx_set_todos(c, &text)

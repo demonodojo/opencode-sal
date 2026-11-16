@@ -41,6 +41,7 @@ done
 
 if [[ "${OC_SAL_E2E:-0}" == "1" ]]; then
   bin="$root/out/linux/bin/supercoder"
+  python3 "$root/tests/test_skill_discovery.py" "$bin"
   port=7422
   mock_pid=""
   start_mock() {  # start_mock GUION [PUERTO]

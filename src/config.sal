@@ -1,4 +1,4 @@
-# Configuración: supercoder.json (en el directorio de trabajo).
+# Configuración: .supercoder/supercoder.json (preferido) o supercoder.json, en el directorio de trabajo.
 #
 # {
 #   "model": "soso-coder",
@@ -28,11 +28,14 @@ import "salkit/strbuf.sal"
 import "salkit/int.sal"
 import "src/provider/claude.sal"
 
-# Configuración leída de supercoder.json: se guarda el texto y se parsea bajo demanda.
+# Configuración leída del directorio de trabajo: se guarda el texto y se parsea bajo demanda.
 struct Cfg
     raw: String
 
 fn cfg_load() -> Cfg ! io, alloc
+    local = ".supercoder/supercoder.json"
+    if fsx_is_file(&local) != 0
+        return Cfg(fsx_read_text(&local))
     Cfg(fsx_read_text(&"supercoder.json"))
 
 fn cfg_raw(c: &Cfg) -> &String

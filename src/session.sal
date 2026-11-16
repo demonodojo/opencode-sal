@@ -8,29 +8,21 @@ import "salkit/json.sal"
 import "salkit/fsx.sal"
 import "salkit/strbuf.sal"
 
-fn session_home() -> String ! io, alloc
-    h = getenv(&"SUPERCODER_HOME")
-    if str_len(h) > 0
-        return h
-    home = getenv(&"HOME")
-    if str_len(home) > 0
-        return home + "/.local/share/supercoder"
-    "/var/supercoder"
+struct Session
+    id: String
 
-fn session_dir(id: &String) -> String ! io, alloc
-    session_home() + "/sessions/" + id
+method Session.dir(&self) -> String ! io, alloc
+    session_home() + "/sessions/" + self.id
 
-fn session_file(id: &String, name: &String) -> String ! io, alloc
-    session_dir(&id) + "/" + name
+method Session.file(&self, name: &String) -> String ! io, alloc
+    self.dir() + "/" + name
 
-# Guarda el historial: array JSON con un mensaje por elemento. 0 si ok.
-fn session_save(id: &String, msgs: &List[String]) -> Int ! io, alloc
-    fsx_write(&session_file(&id, &"messages.json"), &jb_arr(&jb_join(msgs)))
+method Session.save(&self, msgs: &List[String]) -> Int ! io, alloc
+    fsx_write(&self.file(&"messages.json"), &jb_arr(&jb_join(msgs)))
 
-# Recarga el historial como lista de mensajes (vacía si no hay sesión).
-fn session_load(id: &String) -> List[String] ! io, alloc
+method Session.load(&self) -> List[String] ! io, alloc
     out = sk_sl_new()
-    raw = fsx_read_text(&session_file(&id, &"messages.json"))
+    raw = fsx_read_text(&self.file(&"messages.json"))
     if str_len(sk_trim(&raw)) == 0
         return out
     d = json_parse(&raw)
@@ -44,6 +36,29 @@ fn session_load(id: &String) -> List[String] ! io, alloc
         x = sk_sl_push(&mut out, json_dump(&d, n))
         n = json_next(&d, n)
     out
+
+fn session_home() -> String ! io, alloc
+    h = getenv(&"SUPERCODER_HOME")
+    if str_len(h) > 0
+        return h
+    home = getenv(&"HOME")
+    if str_len(home) > 0
+        return home + "/.local/share/supercoder"
+    "/var/supercoder"
+
+fn session_dir(id: &String) -> String ! io, alloc
+    Session(id.dup()).dir()
+
+fn session_file(id: &String, name: &String) -> String ! io, alloc
+    Session(id.dup()).file(name)
+
+# Guarda el historial: array JSON con un mensaje por elemento. 0 si ok.
+fn session_save(id: &String, msgs: &List[String]) -> Int ! io, alloc
+    Session(id.dup()).save(msgs)
+
+# Recarga el historial como lista de mensajes (vacía si no hay sesión).
+fn session_load(id: &String) -> List[String] ! io, alloc
+    Session(id.dup()).load()
 
 # Identificadores de las sesiones guardadas, ordenados.
 fn session_list() -> List[String] ! io, alloc

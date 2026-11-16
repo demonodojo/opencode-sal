@@ -144,13 +144,14 @@ fn grep_note(st: Int, hits: Int, line: Int) -> Int
     0
 
 fn tool_grep(c: &Ctx, d: &JsonDoc, a: Int) -> ToolResult ! io, alloc
-    pattern = arg_str(d, a, &"pattern,regex,query", "")
+    args = ToolArgs(d, a)
+    pattern = args.string(&"pattern,regex,query", "")
     if str_len(pattern) == 0
         return tr_err(&"pattern must not be empty")
-    raw = arg_str(d, a, &"path,dir,directory", ".")
-    include = arg_str(d, a, &"include,glob,filePattern", "")
-    icase = arg_bool(d, a, &"ignoreCase,ignore_case,caseInsensitive", 0)
-    ctx = arg_int(d, a, &"context,contextLines,C", 0)
+    raw = args.string(&"path,dir,directory", ".")
+    include = args.string(&"include,glob,filePattern", "")
+    icase = args.boolean(&"ignoreCase,ignore_case,caseInsensitive", 0)
+    ctx = args.integer(&"context,contextLines,C", 0)
     if ctx < 0
         ctx = 0
     if ctx > 10

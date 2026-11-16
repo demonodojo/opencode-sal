@@ -55,4 +55,18 @@ fn main() -> Int ! io, alloc
     am = msg_assistant(&"", &calls)
     f = f + ck_str(&am, &"{\"role\":\"assistant\",\"content\":\"\",\"tool_calls\":[{\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"read\",\"arguments\":\"{\\\"filePath\\\":\\\"a\\\"}\"}}]}", 22)
     f = f + ck_str(&msg_assistant(&"t", &List.new[Call]()), &"{\"role\":\"assistant\",\"content\":\"t\"}", 23)
+
+    streamed = StreamCalls(List.new[StreamCall]())
+    delta1 = json_parse(&"{\"function\":{\"name\":\"read\",\"arguments\":\"{\\\"path\\\":\"}}")
+    delta2 = json_parse(&"{\"id\":\"call_custom\",\"function\":{\"arguments\":\"\\\"a\\\"}\"}}")
+    delta3 = json_parse(&"{\"function\":{\"name\":\"list\"}}")
+    x = streamed.add_delta(2, &delta1, json_root(&delta1))
+    x = streamed.add_delta(0, &delta3, json_root(&delta3))
+    x = streamed.add_delta(2, &delta2, json_root(&delta2))
+    done = streamed.finish()
+    f = f + ck_int(done.len(), 2, 40)
+    f = f + ck_str(&call_id(done.get(0)), &"call_1", 41)
+    f = f + ck_str(&call_args(done.get(0)), &"{}", 42)
+    f = f + ck_str(&call_id(done.get(1)), &"call_custom", 43)
+    f = f + ck_str(&call_args(done.get(1)), &"{\"path\":\"a\"}", 44)
     f

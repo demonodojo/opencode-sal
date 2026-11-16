@@ -11,6 +11,15 @@
   let todosEl = null;
   let streaming = null; // mensaje del asistente que recibe text_delta
 
+  // Etiquetas del protocolo XML de herramientas y del razonamiento: el modelo las
+  // escribe en el texto, pero no forman parte de la respuesta que se muestra.
+  const HIDDEN_BLOCK = /<\s*(?:antml:)?(tool_calls?|function_calls?|function_call|invoke|parameters?|function|tool_use|tool_result)\b[^>]*>[\s\S]*?<\s*\/\s*(?:antml:)?\1\s*>/gi;
+  const HIDDEN_TAG = /<\s*\/?\s*(?:antml:)?(?:tool_calls?|function_calls?|function_call|invoke|parameters?|function|tool_use|tool_result|think|thinking|reasoning)\b[^>]*>/gi;
+
+  function clean(text) {
+    return String(text).replace(HIDDEN_BLOCK, '').replace(HIDDEN_TAG, '');
+  }
+
   function scroll() { log.scrollTop = log.scrollHeight; }
 
   function add(cls, text, parent) {
@@ -36,10 +45,10 @@
   }
 
   function renderText(text, parent) {
-    if (!parent && streaming) { fillText(streaming, text); streaming = null; scroll(); return; }
+    if (!parent && streaming) { fillText(streaming, clean(text)); streaming = null; scroll(); return; }
     const d = document.createElement('div');
     d.className = 'msg assistant';
-    fillText(d, text);
+    fillText(d, clean(text));
     (parent || log).appendChild(d);
     scroll();
   }
@@ -52,7 +61,7 @@
       log.appendChild(streaming);
     }
     streaming.dataset.raw += text;
-    streaming.textContent = streaming.dataset.raw;
+    streaming.textContent = clean(streaming.dataset.raw);
     scroll();
   }
 

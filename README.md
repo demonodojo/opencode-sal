@@ -26,7 +26,7 @@ soso-pkg instalar supercoder-sal
 
 ## Comandos
 
-- `supercoder` — TUI (logo, sesión y compositor, como OpenCode); `exit`/`quit`/EOF para salir. Cada turno corre en un proceso `supercoder run` aparte y los permisos se preguntan en línea (`[s]i / [a]siempre / [N]o`).
+- `supercoder` — TUI (logo, sesión y compositor, como OpenCode); `exit`/`quit`/EOF para salir; el primer Ctrl-C cancela el turno en marcha (o pide confirmación si la TUI está parada) y el segundo sale. Ctrl-V pega una imagen del portapapeles (se ve como `[Image]` y el retroceso quita la última); sin portapapeles gráfico (soso), escribe o pega la ruta de la imagen y pulsa Intro, o menciónala con `@ruta` en el mensaje. PgUp/PgDn recorren el historial. Cada turno corre en un proceso `supercoder run` aparte y los permisos se preguntan en línea (`[s]i / [a]siempre / [N]o`).
 - `supercoder --version` (0.5.0)
 - `supercoder run [opciones] <prompt>` — agente de código con herramientas, historial real, permisos, subagentes e imágenes (ver abajo)
 - `supercoder session list` — sesiones guardadas
@@ -61,8 +61,8 @@ El historial completo se guarda en `$SUPERCODER_HOME/sessions/<id>/messages.json
 
 Un skill es una carpeta con un `SKILL.md` (frontmatter `name`, `description`, y opcionalmente `disable-model-invocation: true`; admite `description: >-` y `|`). Se buscan, y gana el primero con un nombre dado, en:
 
-1. el directorio de trabajo y sus ascendientes hasta la raíz del repositorio: `.supercoder/skills`, `.opencode/skills`, `.claude/skills`;
-2. el directorio del usuario: `~/.supercoder/skills`, `~/.config/opencode/skills`, `~/.claude/skills` (se siguen los enlaces simbólicos).
+1. el directorio de trabajo y sus ascendientes hasta la raíz del repositorio: `.agents/skills`, `.supercoder/skills`, `.opencode/skills`, `.claude/skills`;
+2. el directorio del usuario: `~/.agents/skills`, `~/.supercoder/skills`, `~/.config/opencode/skills`, `~/.claude/skills` (se siguen los enlaces simbólicos).
 
 El prompt de sistema lista cada skill con su descripción (recortada) y el modelo lo carga con la herramienta `skill` antes de empezar la tarea: recibe el cuerpo, el directorio base y los ficheros que lo acompañan, que puede leer sin pedir permiso. El usuario también puede invocar uno escribiendo `/nombre argumentos` al principio del prompt (`$ARGUMENTS` se sustituye en el cuerpo). `supercoder skills` los lista; las reglas `permission.skill` permiten `allow`/`ask`/`deny` por nombre.
 
@@ -88,7 +88,7 @@ Antes de cada petición se compacta el historial si pasa de 56 mensajes o de `"c
 
 ### Estado en el terminal (OSC 7501)
 
-El protocolo [OSC 7501](https://gist.github.com/mitchellh/7acae3abd8355c1c00287d67e96c913a) (Program Status Protocol) permite que el terminal sepa qué hace el agente y avise cuando necesita algo. `supercoder run` escribe un informe por stderr antes de cada paso (`state=working:app=supercoder:msg=<base64>`), al pedir un permiso (`state=blocked:kind=permission`) y al terminar (`done` o `error`), de modo que la pestaña o el panel del terminal muestra el estado aunque esté en segundo plano.
+El protocolo [OSC 7501](https://gist.github.com/mitchellh/7acae3abd8355c1c00287d67e96c913a) (Program Status Protocol) permite que el terminal sepa qué hace el agente y avise cuando necesita algo. `supercoder run` escribe un informe por stderr antes de cada paso (`state=working:app=supercoder:msg=<base64>`), al pedir un permiso (`state=blocked:kind=permission`) y al terminar (`done` o `error`), de modo que la pestaña o el panel del terminal muestra el estado aunque esté en segundo plano. La TUI informa además `state=idle` al arrancar, para que el terminal (p. ej. Herdr) la reconozca como agente antes del primer turno; después de cada turno no lo repite, para no pisar el `done` del hijo.
 
 Se activa cuando `$TERM` está definido y no es `dumb`; se desactiva con `SUPERCODER_OSC7501=0`. Con `--format json` no se emite salvo que se pase `--osc7501` (la TUI lo hace para el proceso hijo de cada turno), y los subagentes nunca informan. No se envía la consulta `OSC 7501;?` porque su respuesta llegaría por stdin junto con la del usuario.
 
@@ -113,7 +113,7 @@ supercoder run --format json "lee /tmp/oc-fixture.txt"
 
 ## Modelos
 
-`supercoder run --model MODELO …` (o `-m`) elige el modelo; si no se indica, se usa `"model"` de `supercoder.json` y, en su defecto, `soso-coder`. Cada modelo puede hablar con su propio `soso-llm` (puerto en loopback):
+`supercoder run --model MODELO …` (o `-m`) elige el modelo; si no se indica, se usa `"model"` de la configuración y, en su defecto, `soso-coder`. La configuración se lee primero de `.supercoder/supercoder.json` en el directorio de trabajo; si no existe, se usa `supercoder.json` en ese directorio. Si existen ambos, prevalece el archivo de `.supercoder/`. Cada modelo puede hablar con su propio `soso-llm` (puerto en loopback):
 
 ```json
 {

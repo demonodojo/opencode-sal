@@ -8,6 +8,7 @@ import "io/process.sal"
 import "io/pipe.sal"
 import "io/time.sal"
 import "salkit/json.sal"
+import "salkit/proc.sal"
 import "salkit/strbuf.sal"
 import "src/agent/ctx.sal"
 import "src/events.sal"
@@ -199,16 +200,6 @@ fn cs_argv(m: &String, prompt: &String) -> List[String] ! alloc
     x = sk_sl_push(&mut a, prompt.dup())
     a
 
-fn cs_tab(argv: &List[String]) -> Bytes ! alloc
-    n = sk_sl_len(argv)
-    tab = Bytes.new(n * 16 + 16)
-    i = 0
-    while i < n
-        s = sk_sl_get(argv, i)
-        spawn_argv_slot_ptr(&tab, i, &spawn_string_buf(s), s.len())
-        i = i + 1
-    tab
-
 fn cs_secs(ms: Int) -> String ! alloc
     (ms / 1000).to_str() + " s"
 
@@ -228,7 +219,8 @@ fn claude_stream(c: &Ctx, model: &String, prompt: &String) -> CsState ! io, allo
     rd = pp.read_fd()
     wr = pp.write_fd()
     argv = cs_argv(&m, prompt)
-    pid = spawn_io_argv(&"claude", sk_sl_len(&argv), &cs_tab(&argv), SPAWN_FD_CLOSED, wr, wr, &"", 0 - 1)
+    av = proc_argv_tab(&argv)
+    pid = spawn_io_argv(&"claude", sk_sl_len(&argv), &av.tab, SPAWN_FD_CLOSED, wr, wr, &"", 0 - 1)
     Fd.new(wr).close()
     if pid < 0
         Fd.new(rd).close()

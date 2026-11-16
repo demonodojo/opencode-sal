@@ -1,0 +1,17 @@
+import "../../src/tui.sal"
+import "support/assert.sal"
+
+fn main() -> Int ! io, alloc
+    f = 0
+    f = f + ck_int(tui_dimension(&"40 120\n", 0), 40, 1)
+    f = f + ck_int(tui_dimension(&"40 120\n", 1), 120, 2)
+    f = f + ck_str(&tui_tail(&"a\nb\nc\nd\n", 3, 80), &"b\nc\nd\n", 3)
+    f = f + ck_str(&tui_tail(&"a\nb\nc\nd\n", 4, 80), &"a\nb\nc\nd\n", 4)
+    f = f + ck_int(tui_line_rows(&"123456789012345", 20), 2, 5)
+    f = f + ck_int(tui_line_rows(&(tui_bold() + "abc" + tui_reset()), 20), 1, 6)
+    f = f + ck_str(&tui_history_end(&"a\nb\nc\nd\n", 2), &"a\nb\n", 7)
+    f = f + ck_str(&tui_history_end(&"a\nb\n", 20), &"a\n", 8)
+    f = f + ck_int(sk_contains(&tui_frame(&"primero\nsegundo\n", &"", &"modelo", 0), &tui_esc(&"[2J")), 0, 9)
+    f = f + ck_contains(&tui_frame(&"primero\nsegundo\n", &"", &"modelo", 1), &"primero", 10)
+    f = f + ck_int(sk_contains(&tui_frame(&"primero\nsegundo\n", &"", &"modelo", 1), &"segundo"), 0, 11)
+    f

@@ -2,4 +2,5 @@ out/
 target/
 dist/
 /sal_modules
+.supercoder/supercoder.json
 tests/work/

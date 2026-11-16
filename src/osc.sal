@@ -132,6 +132,16 @@ fn osc_body(state: &String, msg: &String) -> String ! alloc
         body = body + ":msg=" + b64_encode_str(&t)
     body
 
+# La TUI esperando al usuario: informa `idle` sin contexto de agente para que el terminal la
+# reconozca como agente desde que arranca (antes del primer turno no habría ningún informe).
+# Solo al arrancar: tras un turno el hijo ya informó `done`, y un `idle` lo pisaría.
+fn osc_idle_tty() -> Int ! io, alloc
+    if osc_env_off() != 0
+        return 0
+    if osc_term_ok() == 0
+        return 0
+    Fd.new(2).write_str(&osc_seq(&("state=idle:app=" + osc_app())))
+
 fn osc_working(c: &Ctx, msg: &String) -> Int ! io, alloc
     osc_write(c, &osc_body(&"working", &msg))
 

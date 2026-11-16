@@ -96,7 +96,8 @@ fn cmd_run() -> Int ! io, alloc
     max_turns = sk_parse_int(&opt_value(n, &"--max-turns", &"--max-turns", &"60"))
     if max_turns < 1
         max_turns = 60
-    run_agent(&prompt, out_mode, max_turns, &opt_value(n, &"--session", &"--session", &"default"), opt_flag(n, &"--continue"), &opt_value(n, &"--model", &"-m", &""), &opt_value(n, &"--agent", &"--agent", &"build"), opt_flag(n, &"--interactive"), opt_flag(n, &"--yes"), sk_parse_int(&opt_value(n, &"--depth", &"--depth", &"0")), &opt_values(n, &"--file"), opt_flag(n, &"--osc7501"))
+    opts = RunOptions(prompt, out_mode, max_turns, opt_value(n, &"--session", &"--session", &"default"), opt_flag(n, &"--continue"), opt_value(n, &"--model", &"-m", &""), opt_value(n, &"--agent", &"--agent", &"build"), opt_flag(n, &"--interactive"), opt_flag(n, &"--yes"), sk_parse_int(&opt_value(n, &"--depth", &"--depth", &"0")), opt_values(n, &"--file"), opt_flag(n, &"--osc7501"))
+    opts.run()
 
 fn cmd_skills() -> Int ! io, alloc
     all = skills_scan()

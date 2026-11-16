@@ -97,6 +97,9 @@ fn main() -> Int ! io, alloc
     f = f + ck_contains(&tr_output(&t2), &"\"content\":\"b\"", 53)
     t3 = run_tool(&mut c3, &"todowrite", &"{\"todos\":[{\"status\":\"pending\"}]}")
     f = f + ck_int(tr_failed(&t3), 1, 54)
+    t4 = run_tool(&mut c3, &"todowrite", &"{\"todos\":[{\"content\":\" c \",\"status\":\"bad\",\"priority\":\"bad\"},{\"content\":\"d\",\"status\":\"cancelled\"}]}")
+    f = f + ck_str(&tr_title(&t4), &"1 todos", 55)
+    f = f + ck_str(&tr_output(&t4), &"[{\"content\":\"c\",\"status\":\"pending\",\"priority\":\"medium\"},{\"content\":\"d\",\"status\":\"cancelled\",\"priority\":\"medium\"}]", 56)
 
     # skills: el repositorio trae .claude/skills/supercoder-sal-agente
     sk = skills_scan()
